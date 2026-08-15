@@ -116,7 +116,7 @@ export function BulkActionBar({
         <span className="text-xs font-semibold text-accent-light whitespace-nowrap">{selectedCount} selected</span>
         <button
           onClick={onClearSelection}
-          className="p-0.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
+          className="p-0.5 rounded hover:bg-bg-elevated text-text-secondary hover:text-text-primary transition-colors"
         >
           <X size={11} />
         </button>
@@ -150,7 +150,7 @@ export function BulkActionBar({
             </button>
             <button
               onClick={() => setActiveInput(null)}
-              className="h-6 px-1.5 rounded text-[11px] text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors"
+              className="h-6 px-1.5 rounded text-[11px] text-text-secondary hover:text-text-primary hover:bg-bg-elevated transition-colors"
             >
               <X size={10} />
             </button>
@@ -163,14 +163,14 @@ export function BulkActionBar({
             <button
               onClick={onMoveUp}
               disabled={!canMoveUp}
-              className="flex items-center gap-1 h-6 px-2 rounded text-[11px] text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-text-tertiary"
+              className="flex items-center gap-1 h-6 px-2 rounded text-[11px] text-text-secondary hover:text-text-primary hover:bg-bg-elevated transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-text-secondary"
             >
               <ArrowUpToLine size={11} />
             </button>
             <button
               onClick={onMoveDown}
               disabled={!canMoveDown}
-              className="flex items-center gap-1 h-6 px-2 rounded text-[11px] text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-text-tertiary"
+              className="flex items-center gap-1 h-6 px-2 rounded text-[11px] text-text-secondary hover:text-text-primary hover:bg-bg-elevated transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-text-secondary"
             >
               <ArrowDownToLine size={11} />
             </button>
@@ -180,7 +180,7 @@ export function BulkActionBar({
             {/* Set Delay */}
             <button
               onClick={() => openInput('delay')}
-              className="flex items-center gap-1 h-6 px-2 rounded text-[11px] text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors"
+              className="flex items-center gap-1 h-6 px-2 rounded text-[11px] text-text-secondary hover:text-text-primary hover:bg-bg-elevated transition-colors"
             >
               <Clock size={11} />
               Delay
@@ -190,7 +190,7 @@ export function BulkActionBar({
                 context menu, so coord-related UI uses the same glyph across the app. */}
             <button
               onClick={() => openInput('x')}
-              className="flex items-center gap-1 h-6 px-2 rounded text-[11px] text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors"
+              className="flex items-center gap-1 h-6 px-2 rounded text-[11px] text-text-secondary hover:text-text-primary hover:bg-bg-elevated transition-colors"
             >
               <Crosshair size={11} />
               X
@@ -198,7 +198,7 @@ export function BulkActionBar({
 
             <button
               onClick={() => openInput('y')}
-              className="flex items-center gap-1 h-6 px-2 rounded text-[11px] text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors"
+              className="flex items-center gap-1 h-6 px-2 rounded text-[11px] text-text-secondary hover:text-text-primary hover:bg-bg-elevated transition-colors"
             >
               <Crosshair size={11} />
               Y
@@ -207,7 +207,7 @@ export function BulkActionBar({
             {/* Set Notes */}
             <button
               onClick={() => openInput('notes')}
-              className="flex items-center gap-1 h-6 px-2 rounded text-[11px] text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors"
+              className="flex items-center gap-1 h-6 px-2 rounded text-[11px] text-text-secondary hover:text-text-primary hover:bg-bg-elevated transition-colors"
             >
               <MessageSquare size={11} />
               Notes
@@ -224,7 +224,7 @@ export function BulkActionBar({
               className={`flex items-center gap-1 h-6 px-2 rounded text-[11px] transition-colors ${
                 allSelectedSkipped
                   ? 'text-accent-light hover:text-accent-light hover:bg-accent-solid/10'
-                  : 'text-text-tertiary hover:text-text-primary hover:bg-bg-elevated'
+                  : 'text-text-secondary hover:text-text-primary hover:bg-bg-elevated'
               }`}
             >
               {allSelectedSkipped ? <Eye size={11} /> : <EyeOff size={11} />}
