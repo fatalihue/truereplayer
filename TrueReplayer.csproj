@@ -33,6 +33,8 @@
 		<WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
 		<SatelliteResourceLanguages>en</SatelliteResourceLanguages>
 		<DefineConstants>DISABLE_XAML_GENERATED_MAIN</DefineConstants>
+		<!-- Prunes the default item globs' traversal — node_modules alone is ~12.4k items walked per evaluation. -->
+		<DefaultItemExcludes>$(DefaultItemExcludes);frontend/node_modules/**;frontend/releases/**;frontend/dist/**</DefaultItemExcludes>
 	</PropertyGroup>
 
 	<ItemGroup>
@@ -197,18 +199,34 @@
     <Message Text="Pruning %(StaleWwwrootPublish.Identity) from the publish payload (no longer in frontend/dist)" Importance="high" Condition="'@(StaleWwwrootPublish)' != ''" />
     <Delete Files="@(StaleWwwrootPublish)" />
   </Target>
-  <!-- Copy Chrome Extension files to output/publish for bundled distribution -->
+  <!-- Copy Chrome Extension files to output/publish for bundled distribution.
+       Both copies prune after the Copy, delete-what's-missing — same rationale as the
+       wwwroot copies above (see the CopyFrontendDist comment for why never RemoveDir). -->
   <Target Name="CopyChromeExtension" AfterTargets="Build">
     <ItemGroup>
       <ChromeExtFiles Include="ChromeExtension\**\*" Exclude="ChromeExtension\**\.git*" />
     </ItemGroup>
     <Copy SourceFiles="@(ChromeExtFiles)" DestinationFiles="@(ChromeExtFiles->'$(OutDir)ChromeExtension\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <ItemGroup>
+      <ExpectedChromeExt Include="@(ChromeExtFiles->'$(OutDir)ChromeExtension\%(RecursiveDir)%(Filename)%(Extension)')" />
+      <ExistingChromeExt Include="$(OutDir)ChromeExtension\**\*" />
+      <StaleChromeExt Include="@(ExistingChromeExt)" Exclude="@(ExpectedChromeExt)" />
+    </ItemGroup>
+    <Message Text="Pruning %(StaleChromeExt.Identity) (no longer in ChromeExtension/)" Importance="high" Condition="'@(StaleChromeExt)' != ''" />
+    <Delete Files="@(StaleChromeExt)" />
   </Target>
   <Target Name="CopyChromeExtensionPublish" AfterTargets="Publish">
     <ItemGroup>
       <ChromeExtFilesPublish Include="ChromeExtension\**\*" Exclude="ChromeExtension\**\.git*" />
     </ItemGroup>
     <Copy SourceFiles="@(ChromeExtFilesPublish)" DestinationFiles="@(ChromeExtFilesPublish->'$(PublishDir)ChromeExtension\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <ItemGroup>
+      <ExpectedChromeExtPublish Include="@(ChromeExtFilesPublish->'$(PublishDir)ChromeExtension\%(RecursiveDir)%(Filename)%(Extension)')" />
+      <ExistingChromeExtPublish Include="$(PublishDir)ChromeExtension\**\*" />
+      <StaleChromeExtPublish Include="@(ExistingChromeExtPublish)" Exclude="@(ExpectedChromeExtPublish)" />
+    </ItemGroup>
+    <Message Text="Pruning %(StaleChromeExtPublish.Identity) from the publish payload (no longer in ChromeExtension/)" Importance="high" Condition="'@(StaleChromeExtPublish)' != ''" />
+    <Delete Files="@(StaleChromeExtPublish)" />
   </Target>
   <!-- Copy NativeHost.exe to output directory for Chrome Extension support -->
   <Target Name="CopyNativeHost" AfterTargets="Build" Condition="Exists('NativeHost\publish\TrueReplayer.NativeHost.exe')">
@@ -221,7 +239,8 @@
   <Target Name="CleanLocalesFolders" AfterTargets="CopyFrontendDistPublish">
     <ItemGroup>
       <AllPublishDirs Include="$([System.IO.Directory]::GetDirectories('$(PublishDir)'))" />
-      <KeepDirs Include="$(PublishDir)en-us;$(PublishDir)wwwroot;$(PublishDir)Microsoft.UI.Xaml" />
+      <!-- ChromeExtension is kept explicitly: MSBuild does not guarantee this target runs before CopyChromeExtensionPublish, and running after it would silently delete the extension from the publish. -->
+      <KeepDirs Include="$(PublishDir)en-us;$(PublishDir)wwwroot;$(PublishDir)Microsoft.UI.Xaml;$(PublishDir)ChromeExtension" />
       <RemoveDirs Include="@(AllPublishDirs)" Exclude="@(KeepDirs)" />
     </ItemGroup>
     <RemoveDir Directories="@(RemoveDirs)" />
