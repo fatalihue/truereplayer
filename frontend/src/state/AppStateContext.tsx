@@ -80,7 +80,6 @@ const initialState: AppState = {
   actions: [],
   dataTable: { headers: [], rows: [], loopOverData: false, onRowError: 'halt', notifyOnLapComplete: true },
   automation: { enabled: true, entries: [] },
-  highlightedActionIndex: null,
   profiles: [],
   activeProfile: null,
   profileOrder: { pinned: [], folders: [], ungroupedOrder: [] },
@@ -131,29 +130,15 @@ function appStateReducer(state: AppState, message: IncomingMessage): AppState {
       };
     case 'status:changed':
       // The Clicker counter / loop-progress resets that used to live here moved to
-      // clickerLiveReducer with those slices — same transitions, same rules.
-      //
-      // Drop the per-row highlight when leaving 'replaying'. Without this the
-      // last executed row stays tinted forever — confusing because nothing's running
-      // anymore, and especially wrong when the user switches profiles mid-replay
-      // (highlight from the old profile would survive onto a row index in the new
-      // one). 'recording' and 'ready' both transition through here and don't have
-      // a notion of "current action", so clearing is safe in both cases.
-      return {
-        ...state,
-        status: message.payload.status,
-        highlightedActionIndex: message.payload.status === 'replaying'
-          ? state.highlightedActionIndex
-          : null,
-      };
+      // clickerLiveReducer with those slices — same transitions, same rules. The per-row
+      // highlight clear moved to highlightReducer the same way.
+      return { ...state, status: message.payload.status };
     case 'actions:updated':
-      return { ...state, actions: message.payload.actions, highlightedActionIndex: null };
+      return { ...state, actions: message.payload.actions };
     case 'data:table':
       return { ...state, dataTable: message.payload };
     case 'automation:state':
       return { ...state, automation: message.payload ?? state.automation };
-    case 'actions:highlight':
-      return { ...state, highlightedActionIndex: message.payload.index };
     case 'profiles:updated':
       return { ...state, profiles: message.payload.profiles, activeProfile: message.payload.activeProfile, profileOrder: message.payload.profileOrder ?? state.profileOrder };
     case 'settings:loaded': {
@@ -191,9 +176,10 @@ function appStateReducer(state: AppState, message: IncomingMessage): AppState {
         ...state,
         pauseState: { isPaused: false, hotkey: '', timeoutMs: 0, startedAt: 0 },
       };
-    // 'clicker:stats' and 'macro:loopProgress' are handled by clickerLiveReducer, NOT here.
-    // Falling through to `default` is the point: returning `state` unchanged is what keeps a
-    // ~4 Hz stats push from re-rendering every useAppState() consumer.
+    // 'clicker:stats' / 'macro:loopProgress' (clickerLiveReducer) and 'actions:highlight'
+    // (highlightReducer) are handled elsewhere, NOT here. Falling through to `default` is the
+    // point: returning `state` unchanged is what keeps a ~4 Hz stats push — or a per-action
+    // highlight push during replay — from re-rendering every useAppState() consumer.
     case 'settings:reset':
       // Increments on every explicit reset. SettingsPanel watches it in an effect to send
       // its non-persistent UI state (the clicker /s ↔ ms unit toggle) back to default.
@@ -290,28 +276,61 @@ function clickerLiveReducer(state: ClickerLiveInternal, message: IncomingMessage
   }
 }
 
+/**
+ * The per-action replay highlight, split out of AppState for the same reason as the live
+ * clicker slices: the backend pushes 'actions:highlight' once per executed action, so keeping
+ * the index in AppState re-rendered every useAppState() consumer at replay rate to tint one
+ * grid row.
+ */
+function highlightReducer(state: number | null, message: IncomingMessage): number | null {
+  switch (message.type) {
+    case 'actions:highlight':
+      return message.payload.index;
+    case 'status:changed':
+      // Drop the per-row highlight when leaving 'replaying'. Without this the
+      // last executed row stays tinted forever — confusing because nothing's running
+      // anymore, and especially wrong when the user switches profiles mid-replay
+      // (highlight from the old profile would survive onto a row index in the new
+      // one). 'recording' and 'ready' both transition through here and don't have
+      // a notion of "current action", so clearing is safe in both cases.
+      return message.payload.status === 'replaying' ? state : null;
+    case 'actions:updated':
+      // The list the index pointed into just changed; a stale index would tint the wrong row.
+      return null;
+    default:
+      // Identity preserved on every other message so highlight consumers don't re-render.
+      return state;
+  }
+}
+
 const AppStateContext = createContext<AppState>(initialState);
 const ClickerLiveContext = createContext<ClickerLiveState>(initialClickerLive);
+const HighlightContext = createContext<number | null>(null);
 
 export function AppStateProvider({ children }: { children: ReactNode }) {
   const { subscribe } = useBridge();
   const [state, dispatch] = useReducer(appStateReducer, initialState);
   const [live, dispatchLive] = useReducer(clickerLiveReducer, initialClickerLiveInternal);
+  const [highlight, dispatchHighlight] = useReducer(highlightReducer, null);
 
   useEffect(() => {
     return subscribe((message) => {
-      // Two reducers, one subscription. Each ignores what it doesn't own and returns its state
-      // unchanged, so a ~4 Hz clicker:stats push only invalidates the live context and a
-      // profile reload only invalidates the main one.
+      // Three reducers, one subscription. Each ignores what it doesn't own and returns its
+      // state unchanged, so a ~4 Hz clicker:stats push only invalidates the live context, a
+      // per-action highlight push only the highlight one, and a profile reload only the main
+      // one.
       dispatch(message);
       dispatchLive(message);
+      dispatchHighlight(message);
     });
   }, [subscribe]);
 
   return (
     <AppStateContext.Provider value={state}>
       <ClickerLiveContext.Provider value={live}>
-        {children}
+        <HighlightContext.Provider value={highlight}>
+          {children}
+        </HighlightContext.Provider>
       </ClickerLiveContext.Provider>
     </AppStateContext.Provider>
   );
@@ -328,4 +347,15 @@ export function useAppState() {
  */
 export function useClickerLive(): ClickerLiveState {
   return useContext(ClickerLiveContext);
+}
+
+/**
+ * Index of the action row the replay engine is currently executing (null when idle). Pushed
+ * once per executed action — read this ONLY where the value is actually rendered (ActionTable's
+ * row tint / auto-scroll, StatusBar's progress read-out). Pulling it into a component that
+ * merely happens to be nearby puts that component back on the per-action render path this
+ * split exists to get it off.
+ */
+export function useHighlightedAction(): number | null {
+  return useContext(HighlightContext);
 }

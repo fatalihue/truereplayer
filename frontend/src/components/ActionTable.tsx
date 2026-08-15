@@ -9,7 +9,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { Mouse, MousePointerClick, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, ChevronDown, ChevronsDownUp, ChevronsUpDown, Plus, Pencil, ScanSearch, Pipette, Globe, CheckCheck, Check, Code2, Files, Hourglass, Repeat2, ExternalLink, Crosshair, Link, GripVertical, Timer, GitBranch, ArrowRightLeft, Combine, Split, MoreHorizontal, Focus, Braces, AppWindow, Clipboard, ClipboardCopy, Play, Pause, EyeOff, RotateCcw, Dice5, Cpu, FileCheck, Clock, ShieldCheck } from 'lucide-react';
 import { canCollapse, canExpand, expandKeystroke } from '../utils/keyRepeat';
 import type { ActionItem } from '../bridge/messageTypes';
-import { useAppState } from '../state/AppStateContext';
+import { useAppState, useHighlightedAction } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useTt, useLanguage } from '../state/LanguageContext';
 import type { Language } from '../state/LanguageContext';
@@ -412,7 +412,11 @@ interface ActionTableProps {
 }
 
 export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps) {
-  const { actions, highlightedActionIndex, buttonStates, activeProfile, pauseState, dataTable } = useAppState();
+  const { actions, buttonStates, activeProfile, pauseState, dataTable } = useAppState();
+  // Separate context on purpose: the highlight advances once per executed action during a
+  // replay, and keeping it out of AppState is what stops every useAppState() consumer
+  // re-rendering at that cadence. This grid renders it, so it pays the price by design.
+  const highlightedActionIndex = useHighlightedAction();
   const { send } = useBridge();
   const tt = useTt();
   const { language } = useLanguage();

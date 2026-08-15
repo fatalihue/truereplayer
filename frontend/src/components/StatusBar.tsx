@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Play, Pause as PauseIcon, MousePointerClick, Folder, List, Gauge, Clock, Repeat } from 'lucide-react';
-import { useAppState, useClickerLive } from '../state/AppStateContext';
+import { useAppState, useClickerLive, useHighlightedAction } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { usePauseTick } from '../hooks/usePauseTick';
 import { formatClickerStats, formatRate, targetCps } from '../utils/clickerFormat';
@@ -10,10 +10,12 @@ import { APP_VERSION } from '../appVersion';
 const Sep = () => <div className="w-px h-3 bg-border-subtle mx-3 shrink-0" />;
 
 export function StatusBar() {
-  const { statusBar, status, highlightedActionIndex, replayChain, pauseState, settings } = useAppState();
-  // Separate context on purpose: these two update ~4×/s during a run, and keeping them out of
-  // AppState is what stops every other panel re-rendering at that cadence.
+  const { statusBar, status, replayChain, pauseState, settings } = useAppState();
+  // Separate contexts on purpose: the live slices update ~4×/s during a run and the highlight
+  // advances once per executed action; keeping them out of AppState is what stops every other
+  // panel re-rendering at those cadences.
   const { clickerStats, loopProgress } = useClickerLive();
+  const highlightedActionIndex = useHighlightedAction();
   const { send } = useBridge();
   const isReplaying = status === 'replaying';
   const isClicker = settings.useCursorClick;

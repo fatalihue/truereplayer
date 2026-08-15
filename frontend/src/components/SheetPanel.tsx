@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowLeft, RefreshCw, Crosshair, Copy, ClipboardPaste, ShieldCheck, ShieldAlert, ShieldQuestion, PlayCircle, Pipette, Check, X, Frame, FolderOpen } from 'lucide-react';
 import { ActionIcon } from './ActionTable';
@@ -13,7 +13,13 @@ import { DurationChips } from './common/DurationChips';
 import { ProcessNameInput } from './common/ProcessNameInput';
 import { chipDotOn, chipDotOff } from './common/chipStyles';
 import { ImageCropper } from './ImageCropper';
-import { LexicalTokenEditor, type LexicalEditorHandle } from './lexical/LexicalTokenEditor';
+// Deferred: only the BrowserType "Text to Type" field renders this, but a static import pulls
+// the whole Lexical editor stack into the sheet's chunk — parsed on the first sheet open even
+// for the plain click/key edits that are the common case. Splitting here needs no ref
+// plumbing: LexicalTokenEditor is a plain named export (no forwardRef), and the imperative
+// handle travels through the `apiRef` prop.
+const LexicalTokenEditor = lazy(() => import('./lexical/LexicalTokenEditor').then(m => ({ default: m.LexicalTokenEditor })));
+import type { LexicalEditorHandle } from './lexical/LexicalTokenEditor';
 import { getDisplayKey } from '../utils/displayUtils';
 import { Field } from './sheet/Field';
 import { WindowTargetFields } from './WindowTargetFields';
@@ -3399,16 +3405,18 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
             {isBrowserType && (
             <Field label="Text to Type">
               <div className="min-h-8 bg-bg-input border border-border-default rounded focus-within:border-accent-solid text-ui font-mono">
-                <LexicalTokenEditor
-                  /* Key by actionIndex so opening a different action re-initialises the
-                     editor with that action's text. Without this the Lexical state
-                     would persist across action switches and the displayed content
-                     wouldn't match the action's browserText. */
-                  key={actionIndex ?? -1}
-                  initialText={browserText}
-                  onChange={setBrowserText}
-                  apiRef={browserTextEditorRef}
-                />
+                <Suspense fallback={null}>
+                  <LexicalTokenEditor
+                    /* Key by actionIndex so opening a different action re-initialises the
+                       editor with that action's text. Without this the Lexical state
+                       would persist across action switches and the displayed content
+                       wouldn't match the action's browserText. */
+                    key={actionIndex ?? -1}
+                    initialText={browserText}
+                    onChange={setBrowserText}
+                    apiRef={browserTextEditorRef}
+                  />
+                </Suspense>
               </div>
               {/* Chip palette — the 3 most-reached tokens on one row; everything else (Tab,
                   Date, Time, and the rare keys) collapses behind the "⋯" expander. Names match

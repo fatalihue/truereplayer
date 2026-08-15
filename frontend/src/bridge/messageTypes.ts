@@ -560,7 +560,6 @@ export interface AppState {
   dataTable: ProfileDataTable;
   // Automation daemon state (master switch + trigger-bearing profiles w/ live status).
   automation: AutomationState;
-  highlightedActionIndex: number | null;
   profiles: ProfileEntry[];
   activeProfile: string | null;
   profileOrder: ProfileOrderData;

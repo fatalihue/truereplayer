@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
+import type { Dispatch, SetStateAction, MutableRefObject } from 'react';
 import { BridgeProvider, useBridge } from './bridge/BridgeContext';
 import { AppStateProvider, useAppState } from './state/AppStateContext';
 import { SelectionProvider } from './state/SelectionContext';
@@ -35,6 +36,77 @@ const ThemeEditor = lazy(() => import('./components/ThemeEditor').then(m => ({ d
 const DataPanel = lazy(() => import('./components/DataPanel').then(m => ({ default: m.DataPanel })));
 const AutomationPanel = lazy(() => import('./components/AutomationPanel').then(m => ({ default: m.AutomationPanel })));
 const RunReportPanel = lazy(() => import('./components/RunReportPanel').then(m => ({ default: m.RunReportPanel })));
+
+// Renders null — this component exists solely to isolate the useTheme() subscription. The zoom
+// setting is the only theme-derived value the shell logic needs, and subscribing AppShell
+// itself to ThemeContext re-rendered the entire three-column layout on every theme edit
+// (each color tweak in the Theme Editor included).
+//
+// Responsive auto-collapse — pairs with the C# window minimum dropping to
+// 960px (half a 1080p display, the side-by-side-with-the-game arrangement):
+// when the window crosses below the threshold, both side panels fold to
+// their icon rails so the action grid keeps a usable width. Crossing-only
+// logic (not continuous) so a panel the user expands while narrow STAYS
+// expanded; panels WE collapsed re-expand when the window widens again.
+// Deliberately bypasses handleToggleSettings so the auto state never
+// touches the persisted ui:settingsCollapsed preference.
+function AutoCollapseOnZoom({ setSidebarCollapsed, setSettingsCollapsed, autoCollapsedRef }: {
+  setSidebarCollapsed: Dispatch<SetStateAction<boolean>>;
+  setSettingsCollapsed: Dispatch<SetStateAction<boolean>>;
+  // Must be the SAME ref object AppShell's manual-toggle handlers write to — a manual toggle
+  // clears these flags to take ownership, and the responsive logic must see that immediately.
+  autoCollapsedRef: MutableRefObject<{ sidebar: boolean; settings: boolean }>;
+}) {
+  // The threshold is expressed in LAYOUT px and scaled by the UI zoom setting
+  // (root.style.zoom, default 90%): zoom scales the layout, not innerWidth, so
+  // the same window width fits more/less UI depending on zoom. 1074 layout px
+  // ≈ both expanded panels + a usable grid (≡ 967 device px at the 90% default,
+  // 1020 back when the default was 95% — a smaller zoom fits more UI in the same
+  // window, so the panels correctly hold out to a narrower window before folding).
+  const NARROW_THRESHOLD_LAYOUT = 1074;
+  const { config: themeConfig } = useTheme();
+  const zoomScale = (themeConfig.uiSettings.zoom ?? 90) / 100;
+  const wasNarrowRef = useRef(false);
+  useEffect(() => {
+    const isNarrow = () => window.innerWidth < NARROW_THRESHOLD_LAYOUT * zoomScale;
+    const applyNarrowState = (narrow: boolean) => {
+      if (narrow) {
+        setSidebarCollapsed(prev => {
+          if (!prev) autoCollapsedRef.current.sidebar = true;
+          return true;
+        });
+        setSettingsCollapsed(prev => {
+          if (!prev) autoCollapsedRef.current.settings = true;
+          return true;
+        });
+      } else {
+        if (autoCollapsedRef.current.sidebar) {
+          autoCollapsedRef.current.sidebar = false;
+          setSidebarCollapsed(false);
+        }
+        if (autoCollapsedRef.current.settings) {
+          autoCollapsedRef.current.settings = false;
+          setSettingsCollapsed(false);
+        }
+      }
+    };
+    // Re-evaluate on mount AND whenever the zoom setting changes (a zoom bump
+    // can push the layout across the threshold without any window resize).
+    const evaluate = () => {
+      const narrow = isNarrow();
+      if (narrow === wasNarrowRef.current) return;
+      wasNarrowRef.current = narrow;
+      applyNarrowState(narrow);
+    };
+    evaluate();
+    window.addEventListener('resize', evaluate);
+    return () => window.removeEventListener('resize', evaluate);
+    // The prop-passed setters and ref ARE stable (useState setters / a useRef), but the lint
+    // can't see that through the prop boundary, so they're listed; the identities never
+    // change, so listing them never re-runs the effect.
+  }, [zoomScale, setSidebarCollapsed, setSettingsCollapsed, autoCollapsedRef]);
+  return null;
+}
 
 // AppShell is rendered inside AppStateProvider so it can read settings to drive
 // mode-dependent visuals (Clicker mode glow, ActionTable replacement).
@@ -178,61 +250,10 @@ function AppShell() {
     setSheetActionIndex(index);
   }, []);
 
-  // Responsive auto-collapse — pairs with the C# window minimum dropping to
-  // 960px (half a 1080p display, the side-by-side-with-the-game arrangement):
-  // when the window crosses below the threshold, both side panels fold to
-  // their icon rails so the action grid keeps a usable width. Crossing-only
-  // logic (not continuous) so a panel the user expands while narrow STAYS
-  // expanded; panels WE collapsed re-expand when the window widens again.
-  // Deliberately bypasses handleToggleSettings so the auto state never
-  // touches the persisted ui:settingsCollapsed preference.
-  //
-  // The threshold is expressed in LAYOUT px and scaled by the UI zoom setting
-  // (root.style.zoom, default 90%): zoom scales the layout, not innerWidth, so
-  // the same window width fits more/less UI depending on zoom. 1074 layout px
-  // ≈ both expanded panels + a usable grid (≡ 967 device px at the 90% default,
-  // 1020 back when the default was 95% — a smaller zoom fits more UI in the same
-  // window, so the panels correctly hold out to a narrower window before folding).
-  const NARROW_THRESHOLD_LAYOUT = 1074;
-  const { config: themeConfig } = useTheme();
-  const zoomScale = (themeConfig.uiSettings.zoom ?? 90) / 100;
-  const wasNarrowRef = useRef(false);
+  // Set by <AutoCollapseOnZoom> (which owns the responsive auto-collapse logic — it lives
+  // outside AppShell to keep the ThemeContext subscription out of the shell) and cleared by
+  // the manual-toggle handlers below when the user takes ownership.
   const autoCollapsedRef = useRef({ sidebar: false, settings: false });
-  useEffect(() => {
-    const isNarrow = () => window.innerWidth < NARROW_THRESHOLD_LAYOUT * zoomScale;
-    const applyNarrowState = (narrow: boolean) => {
-      if (narrow) {
-        setSidebarCollapsed(prev => {
-          if (!prev) autoCollapsedRef.current.sidebar = true;
-          return true;
-        });
-        setSettingsCollapsed(prev => {
-          if (!prev) autoCollapsedRef.current.settings = true;
-          return true;
-        });
-      } else {
-        if (autoCollapsedRef.current.sidebar) {
-          autoCollapsedRef.current.sidebar = false;
-          setSidebarCollapsed(false);
-        }
-        if (autoCollapsedRef.current.settings) {
-          autoCollapsedRef.current.settings = false;
-          setSettingsCollapsed(false);
-        }
-      }
-    };
-    // Re-evaluate on mount AND whenever the zoom setting changes (a zoom bump
-    // can push the layout across the threshold without any window resize).
-    const evaluate = () => {
-      const narrow = isNarrow();
-      if (narrow === wasNarrowRef.current) return;
-      wasNarrowRef.current = narrow;
-      applyNarrowState(narrow);
-    };
-    evaluate();
-    window.addEventListener('resize', evaluate);
-    return () => window.removeEventListener('resize', evaluate);
-  }, [zoomScale]);
 
   const handleToggleSidebar = useCallback(() => {
     // A manual toggle takes ownership — the auto logic must not fight it.
@@ -275,6 +296,14 @@ function AppShell() {
 
   return (
     <div className="h-full flex flex-col bg-bg-base">
+      {/* Null-rendering: hosts the responsive auto-collapse so its useTheme() subscription
+          stays out of AppShell. */}
+      <AutoCollapseOnZoom
+        setSidebarCollapsed={setSidebarCollapsed}
+        setSettingsCollapsed={setSettingsCollapsed}
+        autoCollapsedRef={autoCollapsedRef}
+      />
+
       {/* Title Bar */}
       <TitleBar onOpenCommandPalette={handleOpenCommandPalette} />
 

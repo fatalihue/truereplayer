@@ -84,7 +84,17 @@ export function ImageCropper({ imageBase64, onSave, onCancel }: ImageCropperProp
     function clamp(v: number, min: number, max: number) {
       return Math.max(min, Math.min(max, v));
     }
-    const onMove = (e: MouseEvent) => {
+    // Crop updates are coalesced to ONE run per frame, same doctrine as the ProfilePanel
+    // drags: raw mousemove arrives at the mouse's polling rate (125-1000 Hz for the mice this
+    // app targets) and each run does the coordinate conversion plus a setCrop that re-renders
+    // the whole cropper portal — image, rect, all eight handles — to move a single rectangle.
+    // The handler itself only stashes the latest position.
+    let moveRaf: number | null = null;
+    let pendingPos: { x: number; y: number } | null = null;
+    const flushMove = () => {
+      moveRaf = null;
+      const p = pendingPos;
+      if (!p) return;
       const d = dragRef.current;
       if (!d || !natural) return;
       // clientX/Y are VISUAL, so their delta is a distance on SCREEN. displayScale converts
@@ -92,8 +102,8 @@ export function ImageCropper({ imageBase64, onSave, onCancel }: ImageCropperProp
       // crop outruns the cursor — 11 % too far at the default 0.90, double at zoom 0.5. The
       // rest of this file is already consistent: displayScale is built from layout constants
       // and dispCrop's outputs are written straight back as layout lengths.
-      const dx = (e.clientX - d.startX) / (displayScale * d.zoom);
-      const dy = (e.clientY - d.startY) / (displayScale * d.zoom);
+      const dx = (p.x - d.startX) / (displayScale * d.zoom);
+      const dy = (p.y - d.startY) / (displayScale * d.zoom);
       let { x, y, w, h } = d.startCrop;
       const right = d.startCrop.x + d.startCrop.w;
       const bottom = d.startCrop.y + d.startCrop.h;
@@ -144,6 +154,10 @@ export function ImageCropper({ imageBase64, onSave, onCancel }: ImageCropperProp
         h: Math.round(h),
       });
     };
+    const onMove = (e: MouseEvent) => {
+      pendingPos = { x: e.clientX, y: e.clientY };
+      if (moveRaf === null) moveRaf = requestAnimationFrame(flushMove);
+    };
     const onUp = () => {
       dragRef.current = null;
     };
@@ -152,6 +166,7 @@ export function ImageCropper({ imageBase64, onSave, onCancel }: ImageCropperProp
     return () => {
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
+      if (moveRaf !== null) cancelAnimationFrame(moveRaf);
     };
   }, [natural, displayScale]);
 
