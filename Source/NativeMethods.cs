@@ -102,6 +102,34 @@ namespace TrueReplayer.Interop
         public delegate IntPtr LowLevelMouseProc(int nCode, IntPtr wParam, IntPtr lParam);
         public delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
 
+        // ── Known folders ──
+        // SHGetKnownFolderPath is the only correct way to resolve Downloads:
+        // Environment.SpecialFolder has no entry for it, and %USERPROFILE%\Downloads
+        // guesses wrong when the folder is redirected.
+        private static readonly Guid FOLDERID_Downloads = new("374DE290-123F-4565-9164-39C4925E467B");
+
+        [DllImport("shell32.dll")]
+        private static extern int SHGetKnownFolderPath([MarshalAs(UnmanagedType.LPStruct)] Guid rfid, uint dwFlags, IntPtr hToken, out IntPtr ppszPath);
+
+        /// <summary>Resolved Downloads folder, or null when the shell can't say (never throws).</summary>
+        public static string? TryGetDownloadsFolder()
+        {
+            var pszPath = IntPtr.Zero;
+            try
+            {
+                // Free unconditionally: the docs require CoTaskMemFree on the out pointer
+                // whether or not the call succeeded. FreeCoTaskMem(Zero) is a safe no-op.
+                if (SHGetKnownFolderPath(FOLDERID_Downloads, 0, IntPtr.Zero, out pszPath) == 0)
+                    return Marshal.PtrToStringUni(pszPath);
+            }
+            catch { }
+            finally
+            {
+                Marshal.FreeCoTaskMem(pszPath);
+            }
+            return null;
+        }
+
         // SetLastError=true so a failed hook install (returns IntPtr.Zero) surfaces a meaningful
         // Marshal.GetLastWin32Error() in InputHookManager.Start()'s diagnostic logging.
         [DllImport("user32.dll", SetLastError = true)]

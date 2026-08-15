@@ -154,10 +154,12 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
             onAction: () => { if (activeProfile) { send({ type: 'profile:duplicate', payload: { name: activeProfile } }); onClose(); } },
           },
           {
-            // The only non-nested way in: the other Import button lives INSIDE the Export
-            // dialog, where nobody looking to import would think to open it.
+            // Mirrors the ProfilePanel toolbar's Import button (Download glyph); the
+            // Export dialog's footer keeps a ghost cross-link as the third way in.
             id: 'importprofiles', label: 'Import Profiles',
-            keywords: ['restore', 'load file', 'json'],
+            // 'trprofile' is the literal extension of the file the user just received —
+            // the term they will actually type when the button name doesn't come to mind.
+            keywords: ['restore', 'load file', 'json', 'trprofile', 'share'],
             icon: <Download size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'profile:import', payload: {} }); onClose(); },
           },
@@ -165,7 +167,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
             // Distinct from the header's Export button, which opens a multi-select dialog:
             // this is the one-shot "everything, organisation included" export.
             id: 'exportall', label: 'Export All Profiles',
-            keywords: ['backup', 'save all', 'json'],
+            keywords: ['backup', 'save all', 'json', 'trprofile', 'send', 'share'],
             icon: <Upload size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'profile:export', payload: { names: profiles.map(p => p.name), includeOrganization: true } }); onClose(); },
           },

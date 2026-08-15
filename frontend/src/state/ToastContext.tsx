@@ -53,7 +53,7 @@ function inferType(message: string): ToastType {
 }
 
 export function ToastProvider({ children }: { children: ReactNode }) {
-  const { subscribe } = useBridge();
+  const { subscribe, send } = useBridge();
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   // Track auto-dismiss timers so they can be cancelled on manual dismiss and on unmount —
   // otherwise a pending timer (up to 8s for errors) fires setToasts after the provider is gone.
@@ -129,11 +129,40 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     return subscribe((msg) => {
       if (msg.type === 'alert:show') {
         // Honour an explicit type from the backend (e.g. a partial-success import warning
-        // sent as 'info' so it isn't mis-inferred as a red error); fall back to inference.
-        showToast(msg.payload.message, msg.payload.type);
+        // sent as 'info' so it isn't mis-inferred as a red error) and an explicit duration;
+        // fall back to inference. Duration must be a POSITIVE finite number — 0/negative
+        // would flash-dismiss the toast on the next tick, a silent information drop.
+        const d = msg.payload.duration;
+        showToast(msg.payload.message, {
+          type: msg.payload.type,
+          duration: typeof d === 'number' && isFinite(d) && d > 0 ? d : undefined,
+        });
+      } else if (msg.type === 'profile:exportResult') {
+        // Export feedback lives HERE, with the other backend-push toasts — not in a
+        // panel component whose mounting the CommandPalette's "Export All Profiles"
+        // has no relationship with. The "Show in folder" action echoes the exportId,
+        // pinning this toast to the file THIS export wrote (paths stay server-side).
+        const p = msg.payload;
+        const partial = p.exportedCount < p.requestedCount;
+        let m = partial
+          ? `Exported ${p.exportedCount} of ${p.requestedCount} profile(s)`
+          : `Exported ${p.exportedCount} profile(s)`;
+        if (p.fileName) m += ` to ${p.fileName}`;
+        m += '.';
+        if (partial) m += ` ${p.requestedCount - p.exportedCount} could not be loaded.`;
+        if (p.bundledDependencies.length > 0)
+          m += ` Included ${p.bundledDependencies.length} referenced sub-profile(s): ${p.bundledDependencies.join(', ')}.`;
+        if (p.missingImages > 0) m += ` ${p.missingImages} reference image(s) were missing and not included.`;
+        const hasDisclosures = partial || p.bundledDependencies.length > 0 || p.missingImages > 0;
+        showToast(m, {
+          // A partial export reports data loss — never render it success-green.
+          type: hasDisclosures ? 'info' : 'success',
+          duration: hasDisclosures ? 8000 : undefined,
+          action: { label: 'Show in folder', onClick: () => send({ type: 'file:revealExport', payload: { exportId: p.exportId } }) },
+        });
       }
     });
-  }, [subscribe, showToast]);
+  }, [subscribe, showToast, send]);
 
   // Never invalidates: every member is a stable useCallback.
   const api = useMemo(

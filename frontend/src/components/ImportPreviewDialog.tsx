@@ -1,10 +1,13 @@
 import { useState, useMemo, useEffect } from 'react';
-import { Download, AlertTriangle, FolderOpen, Keyboard, Hash, Pencil, Replace, Ban } from 'lucide-react';
+import { Download, AlertTriangle, FolderOpen, Hash, Pencil, Replace, Ban, Type, Zap, PackageCheck, Link2 } from 'lucide-react';
 import type { ImportPreviewPayload, ImportConflictResolution } from '../bridge/messageTypes';
-import { Checkbox } from './Checkbox';
+import { Checkbox, CheckboxBox } from './Checkbox';
 import { DialogShell } from './common/DialogShell';
 import { Button } from './common/Button';
+import { SegmentedControl, type SegmentOption } from './common/SegmentedControl';
+import { KbdTag } from './common/KbdTag';
 import { useTt } from '../state/LanguageContext';
+import { formatDate, formatRelative } from '../utils/dateFormat';
 
 interface ImportPreviewDialogProps {
   preview: ImportPreviewPayload;
@@ -21,6 +24,12 @@ interface ImportPreviewDialogProps {
  * Phase 2 of the import flow (after the security warning, if shown). Renders one
  * checkbox row per profile in the .trprofile envelope so the user can review
  * metadata + cherry-pick which ones to actually import.
+ *
+ * Row anatomy is four zones of decreasing weight (2026-08 rework): identity
+ * (emoji/name/version, provenance right-aligned as a watermark) → description
+ * (the one field that says WHAT a third-party profile does) → risk facts
+ * (hotkey, hotstring, repeats, target, automation trigger) → scale
+ * (actions/images/data rows). Dependencies and tags sit between risk and scale.
  *
  * Incompatible profiles (AppMinVersion > running version) are rendered greyed-out
  * with a reason and cannot be selected — the backend rejects them as a safety net
@@ -61,24 +70,30 @@ export function ImportPreviewDialog({ preview, onConfirm, onCancel }: ImportPrev
     setConflictResolutions(initialResolutions);
   }, [initialSelection, initialResolutions]);
 
-  const conflictCount = preview.profiles.filter(p => p.nameConflict).length;
-  // Bulk-apply: when every conflicting profile shares the same resolution, the bulk pills
-  // show that as the active state. Click switches every conflict at once.
+  // Two conflict scopes, deliberately distinct: the HEADER counts every conflict in
+  // the file (it summarizes the file); the bulk banner below counts — and applies
+  // to — SELECTED rows only. The banner used to count everything, so bulk-apply
+  // silently rewrote resolutions on rows the user had already unchecked.
+  const conflictCountAll = preview.profiles.filter(p => p.nameConflict).length;
+  const selectedConflictNames = useMemo(
+    () => preview.profiles.filter(p => p.nameConflict && !!selected[p.name]).map(p => p.name),
+    [preview.profiles, selected]
+  );
+
+  // Bulk-apply: when every SELECTED conflicting profile shares the same resolution,
+  // the bulk control shows it as the active segment. null = they disagree (no segment
+  // active); clicking one resets every selected conflict at once.
   const bulkResolution: ImportConflictResolution | null = useMemo(() => {
-    if (conflictCount === 0) return null;
-    const vals = preview.profiles
-      .filter(p => p.nameConflict)
-      .map(p => conflictResolutions[p.name]);
+    if (selectedConflictNames.length === 0) return null;
+    const vals = selectedConflictNames.map(n => conflictResolutions[n] ?? 'rename');
     const first = vals[0];
     return vals.every(v => v === first) ? first : null;
-  }, [preview.profiles, conflictResolutions, conflictCount]);
+  }, [selectedConflictNames, conflictResolutions]);
 
   const applyBulkResolution = (res: ImportConflictResolution) => {
     setConflictResolutions(prev => {
       const next = { ...prev };
-      preview.profiles.forEach(p => {
-        if (p.nameConflict) next[p.name] = res;
-      });
+      selectedConflictNames.forEach(n => { next[n] = res; });
       return next;
     });
   };
@@ -100,6 +115,9 @@ export function ImportPreviewDialog({ preview, onConfirm, onCancel }: ImportPrev
 
   const compatibleCount = preview.profiles.filter(p => p.compatible).length;
   const incompatibleCount = preview.profiles.length - compatibleCount;
+  // Derived from selectedCount, not a second every() scan — two independent formulas
+  // for "how many selectable rows are selected" could silently diverge.
+  const allSelected = compatibleCount > 0 && selectedCount === compatibleCount;
 
   const handleConfirm = () => {
     const names = Object.entries(selected)
@@ -114,6 +132,24 @@ export function ImportPreviewDialog({ preview, onConfirm, onCancel }: ImportPrev
     preview.profiles.forEach(p => { next[p.name] = value && p.compatible; });
     setSelected(next);
   };
+
+  // Conflict resolutions on the DS SegmentedControl (the hand-rolled ResolutionChips
+  // predated it). Each option carries its CONSEQUENCE as the tooltip — "Rename" alone
+  // never said the import lands as "Name (2)", nor "Overwrite" that it destroys yours.
+  const resolutionOptions = (iconSize: number): SegmentOption<ImportConflictResolution>[] => [
+    {
+      value: 'rename', label: 'Rename', icon: <Pencil size={iconSize} />,
+      tip: tt("Imports as 'Name (2)' — keeps yours untouched.", "Importa como 'Nome (2)' — mantém o seu intacto."),
+    },
+    {
+      value: 'overwrite', label: 'Overwrite', icon: <Replace size={iconSize} />,
+      tip: tt('Replaces your local profile with the incoming one.', 'Substitui o seu perfil local pelo que está chegando.'),
+    },
+    {
+      value: 'skip', label: 'Skip', icon: <Ban size={iconSize} />,
+      tip: tt('Not imported — the row stays checked but is skipped.', 'Não importa — a linha continua marcada mas é pulada.'),
+    },
+  ];
 
   return (
     <DialogShell
@@ -150,65 +186,75 @@ export function ImportPreviewDialog({ preview, onConfirm, onCancel }: ImportPrev
       // shell (it already stops propagation before this runs).
       onCardKeyDown={(e) => e.stopPropagation()}
     >
-        {/* File summary */}
+        {/* File summary — three reading levels: the file, then the numbers that size
+            the review task (the decision line), then forensic provenance demoted to
+            tertiary. The old header opened with the trivia and scattered the decision
+            numbers across three bands. */}
         <div className="px-4 py-3 border-b border-border-subtle bg-bg-surface/30">
           <div className="flex items-center gap-2 text-xs">
             <FolderOpen size={12} className="text-text-tertiary" />
             <span className="text-text-secondary font-medium truncate">{preview.fileName}</span>
           </div>
-          <div className="mt-1 text-[11px] text-text-tertiary flex flex-wrap gap-x-4 gap-y-0.5">
-            <span>Exported: {formatDate(preview.exportedAt)}</span>
-            <span>Format: v{preview.envelopeVersion}</span>
-            <span>Your app: v{preview.runningVersion}</span>
-            {preview.hasOrganization && (
-              <span className="text-accent-light">
-                + folder organization
+          <div className="mt-1 text-xs text-text-secondary flex flex-wrap items-center gap-x-3 gap-y-0.5">
+            <span>{preview.profiles.length} profile{preview.profiles.length === 1 ? '' : 's'}</span>
+            {conflictCountAll > 0 && (
+              <span
+                className="text-warning-ink flex items-center gap-1"
+                data-tip={tt('Resolved per row below — the banner applies to selected rows only.', 'Resolvidos linha a linha abaixo — o banner age só nas linhas selecionadas.')}
+              >
+                <AlertTriangle size={11} style={{ color: 'var(--color-warning)' }} />
+                {conflictCountAll} name conflict{conflictCountAll === 1 ? '' : 's'}
               </span>
             )}
-          </div>
-        </div>
-
-        {/* Bulk-select toolbar */}
-        <div className="px-4 py-2 border-b border-border-subtle flex items-center justify-between text-[11px] text-text-tertiary">
-          <span>
-            {preview.profiles.length} profile{preview.profiles.length === 1 ? '' : 's'} in this file
             {incompatibleCount > 0 && (
-              <span className="text-amber-400 ml-2">
-                ({incompatibleCount} incompatible)
+              <span
+                className="text-warning-ink"
+                data-tip={tt('Incompatible profiles cannot be selected.', 'Perfis incompatíveis não podem ser selecionados.')}
+              >
+                {incompatibleCount} incompatible
               </span>
             )}
-          </span>
-          <div className="flex gap-3">
-            <button
-              onClick={() => toggleAll(true)}
-              disabled={compatibleCount === 0}
-              className="hover:text-text-primary transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              Select all
-            </button>
-            <button
-              onClick={() => toggleAll(false)}
-              className="hover:text-text-primary transition-colors"
-            >
-              Clear
-            </button>
+            {preview.hasOrganization && (
+              <span className="text-accent-light">+ folder organization</span>
+            )}
+          </div>
+          <div className="mt-1 text-[11px] text-text-tertiary flex flex-wrap gap-x-4 gap-y-0.5">
+            <span>Exported {formatDate(preview.exportedAt)}</span>
+            <span>Format v{preview.envelopeVersion}</span>
+            <span>Your app v{preview.runningVersion}</span>
           </div>
         </div>
 
-        {/* Bulk conflict resolution — only rendered when at least one selected profile
-            collides with an existing local name. Renders large pills with icons so the
-            bulk action is the obvious primary control; per-row pills below are smaller
-            "override" overrides. Lets the user resolve everything in one click. */}
-        {conflictCount > 0 && (
-          <div className="px-4 py-3 border-b border-border-subtle bg-amber-900/25 flex items-center gap-4 flex-wrap">
-            <span className="text-xs font-medium text-amber-400 flex items-center gap-2">
-              <AlertTriangle size={14} />
-              {conflictCount} name conflict{conflictCount === 1 ? '' : 's'} — apply to all:
+        {/* Select-all — the Export dialog's row idiom (CheckboxBox + count), replacing
+            the hover-only "Select all / Clear" text links. */}
+        <div className="px-4 py-1.5 border-b border-border-subtle">
+          <button
+            type="button"
+            onClick={() => toggleAll(!allSelected)}
+            disabled={compatibleCount === 0}
+            className="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-bg-surface cursor-pointer text-left disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <CheckboxBox checked={allSelected} indeterminate={selectedCount > 0 && !allSelected} />
+            <span className="text-xs font-medium text-text-secondary">Select all</span>
+            <span className="ml-auto text-[10px] text-text-tertiary">{selectedCount}/{compatibleCount}</span>
+          </button>
+        </div>
+
+        {/* Bulk conflict resolution — rendered only when at least one SELECTED profile
+            collides with an existing local name, and bulk-apply touches only those
+            rows (unchecked rows keep their resolution untouched). Warning band, not a
+            hardcoded amber wash. */}
+        {selectedConflictNames.length > 0 && (
+          <div className="warning-band px-4 py-3 border-b border-border-subtle flex items-center gap-4 flex-wrap">
+            <span className="text-xs font-medium text-warning-ink flex items-center gap-2">
+              <AlertTriangle size={14} style={{ color: 'var(--color-warning)' }} />
+              {selectedConflictNames.length} name conflict{selectedConflictNames.length === 1 ? '' : 's'} — apply to all:
             </span>
-            <ResolutionChips
+            <SegmentedControl
+              options={resolutionOptions(12)}
               value={bulkResolution}
               onChange={applyBulkResolution}
-              size="lg"
+              ariaLabel="Resolve all name conflicts"
             />
           </div>
         )}
@@ -220,18 +266,32 @@ export function ImportPreviewDialog({ preview, onConfirm, onCancel }: ImportPrev
             return (
               <div
                 key={i}
-                className={`flex items-start gap-3 px-3 py-2.5 rounded border ${
+                className={`flex items-start gap-3 px-3 py-2.5 rounded border transition-colors ${
                   p.compatible
                     ? 'border-border-subtle bg-bg-card hover:bg-bg-surface'
-                    : 'border-amber-900/40 bg-amber-950/10 opacity-70'
-                } transition-colors`}
+                    : ''
+                }`}
+                // Incompatible card: warning mixed into the neutral border + a 6%
+                // translucent tint. The border carries the read where the tint is
+                // too faint (saturated backgrounds); both work on light and dark.
+                // NO whole-card opacity: it compounded with the disabled Checkbox's
+                // own opacity-50 (0.35 effective — the tooltip target vanished), and
+                // the user still needs to READ what an incompatible profile is.
+                style={p.compatible ? undefined : {
+                  borderColor: 'color-mix(in srgb, var(--color-warning) 30%, var(--color-border-subtle))',
+                  background: 'color-mix(in srgb, var(--color-warning) 6%, transparent)',
+                }}
               >
-                {/* Checkbox */}
+                {/* Checkbox — disabled (not just no-op) on incompatible rows, with the
+                    reason on hover; the body warning below stays as the primary read. */}
                 <div className="pt-0.5">
                   <Checkbox
                     checked={isChecked && p.compatible}
+                    disabled={!p.compatible}
+                    title={!p.compatible
+                      ? tt(`Requires TrueReplayer ${p.appMinVersion} or newer`, `Requer TrueReplayer ${p.appMinVersion} ou mais novo`)
+                      : undefined}
                     onChange={(value) => {
-                      if (!p.compatible) return;
                       setSelected(prev => ({ ...prev, [p.name]: value }));
                     }}
                   />
@@ -242,75 +302,116 @@ export function ImportPreviewDialog({ preview, onConfirm, onCancel }: ImportPrev
                   {p.iconEmoji || '📄'}
                 </div>
 
-                {/* Main info */}
+                {/* Main info — the four zones. */}
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
+                  {/* Z1 — identity; provenance right-aligned as a watermark, with the
+                      created date on hover instead of competing inline. */}
+                  <div className="flex items-center gap-2">
                     <span className="text-xs font-medium text-text-primary truncate">{p.name}</span>
-                    <span className="text-[10px] px-1.5 py-px rounded bg-bg-surface text-text-tertiary border border-border-subtle">
+                    <span className="text-[10px] px-1.5 py-px rounded bg-bg-surface text-text-tertiary border border-border-subtle shrink-0">
                       v{p.profileVersion}
                     </span>
-                  </div>
-
-                  <div className="mt-0.5 flex items-center gap-3 text-[11px] text-text-tertiary flex-wrap">
-                    <span>{p.actionCount} action{p.actionCount === 1 ? '' : 's'}</span>
-                    {!!p.imageCount && (
-                      <span>{p.imageCount} image{p.imageCount === 1 ? '' : 's'}</span>
-                    )}
-                    {/* Loop count is per-profile and travels with the export. Shown only when it
-                        actually repeats: an incoming profile that fires 500 clicks per press
-                        should not be a surprise the receiver discovers by running it. */}
-                    {p.enableLoop && (p.loopCount ?? 1) > 1 && (
-                      <span>repeats {p.loopCount}×</span>
-                    )}
-                    {p.hotkey && (
-                      <span className="flex items-center gap-1">
-                        <Keyboard size={10} />
-                        {p.hotkey}
+                    {p.updatedAt && (
+                      <span
+                        className="ml-auto shrink-0 text-[10px] text-text-disabled"
+                        data-tip={p.createdAt ? tt(`Created ${formatDate(p.createdAt)}`, `Criado em ${formatDate(p.createdAt)}`) : undefined}
+                      >
+                        Updated {formatRelative(p.updatedAt)}
                       </span>
                     )}
-                    {p.updatedAt && (
-                      <span>Updated {formatRelative(p.updatedAt)}</span>
-                    )}
                   </div>
 
-                  {p.targetProcessName && (
-                    <div className="mt-0.5 text-[11px] text-text-tertiary truncate">
-                      Targets: <span className="font-mono">{p.targetProcessName}</span>
+                  {/* Z2 — description, promoted: for a third-party profile this is the
+                      only field that says WHAT it does. It used to sit below the
+                      dependency chips. */}
+                  {p.description && (
+                    <div className="mt-0.5 text-[11px] text-text-secondary leading-snug line-clamp-2">
+                      {p.description}
                     </div>
                   )}
 
-                  {/* Run Profile dependency chips: green = bundled here, neutral = will call your
-                      existing profile of that name, amber = nothing to call (silent skip at replay). */}
+                  {/* Z3 — risk facts, grouped and one nuance above the scale line:
+                      what the profile will DO to this machine once imported. */}
+                  {(p.hotkey || p.hotstring || (p.enableLoop && (p.loopCount ?? 1) > 1) || p.targetProcessName || p.targetWindowTitle || p.hasTrigger) && (
+                    <div className="mt-1 flex items-center gap-x-2.5 gap-y-1 flex-wrap text-[11px] text-text-secondary">
+                      {/* Hostile-envelope guard: KbdTag renders one unbreakable monospace
+                          token, so an absurd combo would overflow the card sideways.
+                          Sane combos keep the chip; junk degrades to a clamped span. */}
+                      {p.hotkey && (
+                        p.hotkey.length <= 40
+                          ? <KbdTag combo={p.hotkey} unified />
+                          : <span className="font-mono truncate max-w-[160px]">{p.hotkey}</span>
+                      )}
+                      {p.hotstring && (
+                        <span
+                          className="font-mono flex items-center gap-1 max-w-[160px]"
+                          data-tip={tt('Fires when this text is typed.', 'Dispara quando este texto é digitado.')}
+                        >
+                          <Type size={10} className="text-text-tertiary shrink-0" />
+                          <span className="truncate">{p.hotstring}</span>
+                        </span>
+                      )}
+                      {/* Loop count travels with the export. Shown only when it actually
+                          repeats: an incoming profile that fires 500 clicks per press
+                          should not be a surprise the receiver discovers by running it. */}
+                      {p.enableLoop && (p.loopCount ?? 1) > 1 && (
+                        <span>repeats {p.loopCount}×</span>
+                      )}
+                      {(p.targetProcessName || p.targetWindowTitle) && (
+                        <span className="truncate">
+                          {/* Falls back to the window TITLE when no process name travels —
+                              the target used to vanish entirely in that case. */}
+                          Targets: <span className="font-mono">{p.targetProcessName ?? p.targetWindowTitle}</span>
+                        </span>
+                      )}
+                      {p.hasTrigger && (
+                        <span
+                          className="flex items-center gap-1 text-warning-ink"
+                          data-tip={tt(
+                            'This profile has an automation trigger. It arrives DISARMED — arm it in Automation after importing.',
+                            'Este perfil tem um gatilho de automação. Ele chega DESARMADO — arme em Automation depois de importar.'
+                          )}
+                        >
+                          <Zap size={10} style={{ color: 'var(--color-warning)' }} />
+                          Automation trigger
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Run Profile dependency chips: bundled here / calls your existing
+                      profile / nothing to call. The glyph is the second channel — the
+                      text color alone died on the presets where the hues converge. */}
                   {p.dependencies && p.dependencies.length > 0 && (
                     <div className="mt-1 flex flex-wrap items-center gap-1">
                       <span className="text-[10px] text-text-tertiary">Runs:</span>
-                      {p.dependencies.map(d => (
-                        <span
-                          key={d.name}
-                          className="text-[10px] px-1.5 py-0.5 rounded border font-mono"
-                          data-tip={
-                            d.status === 'inEnvelope'
-                              ? tt('Bundled in this file — will be imported alongside.', 'Incluído neste arquivo — será importado junto.')
-                              : d.status === 'localOnly'
-                                ? tt('Not in this file — will call YOUR existing profile of this name.', 'Não está neste arquivo — vai chamar o SEU perfil existente com este nome.')
-                                : tt('Not found here or locally — this Run Profile step will do nothing at replay.', 'Não existe aqui nem localmente — este passo Run Profile não fará nada na reprodução.')
-                          }
-                          style={{
-                            color: d.status === 'inEnvelope' ? 'var(--color-replay)'
-                                 : d.status === 'missing' ? 'var(--color-warning)'
-                                 : 'var(--color-text-tertiary)',
-                            borderColor: 'var(--color-border-subtle)',
-                          }}
-                        >
-                          {d.name}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-
-                  {p.description && (
-                    <div className="mt-1 text-[11px] text-text-secondary leading-snug line-clamp-2">
-                      {p.description}
+                      {p.dependencies.map(d => {
+                        const DepIcon = d.status === 'inEnvelope' ? PackageCheck
+                                      : d.status === 'missing' ? AlertTriangle
+                                      : Link2;
+                        return (
+                          <span
+                            key={d.name}
+                            className="text-[10px] px-1.5 py-0.5 rounded border font-mono inline-flex items-center gap-1"
+                            data-tip={
+                              d.status === 'inEnvelope'
+                                ? tt('Bundled in this file — will be imported alongside.', 'Incluído neste arquivo — será importado junto.')
+                                : d.status === 'localOnly'
+                                  ? tt('Not in this file — will call YOUR existing profile of this name.', 'Não está neste arquivo — vai chamar o SEU perfil existente com este nome.')
+                                  : tt('Not found here or locally — this Run Profile step will do nothing at replay.', 'Não existe aqui nem localmente — este passo Run Profile não fará nada na reprodução.')
+                            }
+                            style={{
+                              color: d.status === 'inEnvelope' ? 'var(--color-replay)'
+                                   : d.status === 'missing' ? 'var(--color-warning)'
+                                   : 'var(--color-text-tertiary)',
+                              borderColor: 'var(--color-border-subtle)',
+                            }}
+                          >
+                            <DepIcon size={9} className="shrink-0" />
+                            {d.name}
+                          </span>
+                        );
+                      })}
                     </div>
                   )}
 
@@ -328,9 +429,20 @@ export function ImportPreviewDialog({ preview, onConfirm, onCancel }: ImportPrev
                     </div>
                   )}
 
+                  {/* Z4 — scale, demoted to the last line in tertiary. */}
+                  <div className="mt-1 text-[11px] text-text-tertiary flex items-center gap-3 flex-wrap">
+                    <span>{p.actionCount} action{p.actionCount === 1 ? '' : 's'}</span>
+                    {!!p.imageCount && (
+                      <span>{p.imageCount} image{p.imageCount === 1 ? '' : 's'}</span>
+                    )}
+                    {p.dataRowCount > 0 && (
+                      <span>{p.dataRowCount} data row{p.dataRowCount === 1 ? '' : 's'}</span>
+                    )}
+                  </div>
+
                   {!p.compatible && (
-                    <div className="mt-1.5 flex items-start gap-1.5 text-[11px] text-amber-400">
-                      <AlertTriangle size={11} className="mt-0.5 flex-shrink-0" />
+                    <div className="mt-1.5 flex items-start gap-1.5 text-[11px] text-warning-ink">
+                      <AlertTriangle size={11} className="mt-0.5 flex-shrink-0" style={{ color: 'var(--color-warning)' }} />
                       <span>
                         Requires TrueReplayer {p.appMinVersion} or newer — cannot import.
                       </span>
@@ -351,11 +463,14 @@ export function ImportPreviewDialog({ preview, onConfirm, onCancel }: ImportPrev
                           Yours v{p.localVersion}{p.localUpdatedAt ? ` · ${formatRelative(p.localUpdatedAt)}` : ''}
                         </div>
                       )}
-                      <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-amber-400/90">
+                      <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-warning-ink">
                         <span>Name exists:</span>
-                        <ResolutionChips
+                        <SegmentedControl
+                          options={resolutionOptions(11)}
+                          dense
                           value={conflictResolutions[p.name] ?? 'rename'}
                           onChange={(res) => setConflictResolutions(prev => ({ ...prev, [p.name]: res }))}
+                          ariaLabel={`Resolve name conflict for ${p.name}`}
                         />
                       </div>
                     </>
@@ -367,100 +482,4 @@ export function ImportPreviewDialog({ preview, onConfirm, onCancel }: ImportPrev
         </div>
     </DialogShell>
   );
-}
-
-// ── Resolution chips ──
-// Segmented control for picking how a name-conflict should be resolved.
-//   - size="sm"  → per-row override, compact (no icons, small text)
-//   - size="lg"  → bulk header pill, prominent (icons + bigger text) so it's
-//                  obvious as the primary control. Per-row chips are visually
-//                  subordinate so the user reads top→down as "apply to all,
-//                  then tweak individuals".
-// `value` is null in the bulk control when the per-row choices disagree — no
-// chip highlighted, clicking one resets every conflicting row to that value.
-
-interface ResolutionChipsProps {
-  value: ImportConflictResolution | null;
-  onChange: (resolution: ImportConflictResolution) => void;
-  size?: 'sm' | 'lg';
-}
-
-function ResolutionChips({ value, onChange, size = 'sm' }: ResolutionChipsProps) {
-  const options: {
-    key: ImportConflictResolution;
-    label: string;
-    Icon: React.ComponentType<{ size?: number; className?: string }>;
-  }[] = [
-    { key: 'rename', label: 'Rename', Icon: Pencil },
-    { key: 'overwrite', label: 'Overwrite', Icon: Replace },
-    { key: 'skip', label: 'Skip', Icon: Ban },
-  ];
-
-  // Size variants. lg pumps padding + adds an icon; sm stays as the tight overlay
-  // it used to be. shadow on lg gives it a button-like lift over the tinted header.
-  const isLg = size === 'lg';
-  const btnPad = isLg ? 'px-3 py-1.5' : 'px-2 py-0.5';
-  const textSize = isLg ? 'text-xs font-medium' : 'text-[11px]';
-  const iconSize = isLg ? 12 : 10;
-  const containerExtra = isLg ? 'shadow-sm' : '';
-
-  return (
-    <div className={`inline-flex rounded border border-border-subtle overflow-hidden ${containerExtra}`}>
-      {options.map((opt, i) => {
-        const active = value === opt.key;
-        return (
-          <button
-            key={opt.key}
-            type="button"
-            onClick={() => onChange(opt.key)}
-            className={`${btnPad} ${textSize} flex items-center gap-1.5 transition-colors ${
-              active
-                ? 'bg-accent-solid/30 text-text-primary'
-                : 'bg-bg-card text-text-tertiary hover:bg-bg-surface hover:text-text-secondary'
-            } ${i > 0 ? 'border-l border-border-subtle' : ''}`}
-          >
-            {isLg && <opt.Icon size={iconSize} className={active ? 'text-accent' : 'text-text-tertiary'} />}
-            {opt.label}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-// ── Date helpers ──
-// Kept inline to avoid yet another util module. If a third dialog ends up needing
-// these, factor into src/utils/dateFormat.ts.
-
-function formatDate(iso: string | null | undefined): string {
-  if (!iso) return 'Unknown';
-  try {
-    const d = new Date(iso);
-    if (isNaN(d.getTime())) return 'Unknown';
-    return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
-  } catch {
-    return 'Unknown';
-  }
-}
-
-function formatRelative(iso: string | null | undefined): string {
-  if (!iso) return '';
-  try {
-    const d = new Date(iso);
-    if (isNaN(d.getTime())) return '';
-    const diffMs = Date.now() - d.getTime();
-    const diffSec = Math.floor(diffMs / 1000);
-    if (diffSec < 60) return 'just now';
-    const diffMin = Math.floor(diffSec / 60);
-    if (diffMin < 60) return `${diffMin}m ago`;
-    const diffHr = Math.floor(diffMin / 60);
-    if (diffHr < 24) return `${diffHr}h ago`;
-    const diffDay = Math.floor(diffHr / 24);
-    if (diffDay < 30) return `${diffDay}d ago`;
-    const diffMo = Math.floor(diffDay / 30);
-    if (diffMo < 12) return `${diffMo}mo ago`;
-    return `${Math.floor(diffMo / 12)}y ago`;
-  } catch {
-    return '';
-  }
 }

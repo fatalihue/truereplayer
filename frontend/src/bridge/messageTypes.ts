@@ -278,6 +278,12 @@ export interface ImportPreviewProfile {
   hotstring: string | null;
   targetProcessName: string | null;
   targetWindowTitle: string | null;
+  /** True when the profile ships an automation trigger. It always arrives DISARMED
+   *  (DisarmedTriggerClone forces Armed=false) — this field exists so the preview can
+   *  SAY so instead of the receiver concluding the profile "doesn't work". */
+  hasTrigger: boolean;
+  /** Row count of the bundled data-loop table, 0 when none travels. */
+  dataRowCount: number;
   /** RunProfile refs this profile calls, each classified: 'inEnvelope' = bundled here;
    *  'localOnly' = will call YOUR existing profile of that name; 'missing' = nothing to call. */
   dependencies?: { name: string; status: 'inEnvelope' | 'localOnly' | 'missing' }[];
@@ -286,6 +292,28 @@ export interface ImportPreviewProfile {
   /** On a name conflict, the local profile's version/updated-at, for an incoming-vs-yours diff. */
   localVersion?: number | null;
   localUpdatedAt?: string | null;
+}
+
+/** Post-import result pushed when the confirm finished with anything worth reading —
+ *  it replaces what used to be a single 300+ char toast plus N loose collision toasts. */
+export interface ImportResultPayload {
+  imported: number;
+  /** Final names as written to disk (post-rename). */
+  importedNames: string[];
+  /** Collision renames as exact (requested → written) pairs recorded by the import
+   *  itself — never derived by set-difference, which misread ".json"-suffixed
+   *  envelope names as renames. */
+  renames: { from: string; to: string }[];
+  skipped: number;
+  /** Per-file failure reasons live in the app log — the dialog names the files. */
+  imageFailureNames: string[];
+  hasOrganization: boolean;
+  /** Existing folders whose window target was filled in by the import. */
+  adoptedFolderTargets: string[];
+  /** Folders where YOUR existing target won over the sender's. */
+  keptLocalFolderTargets: string[];
+  /** Pre-composed collision messages (backend strings, English). */
+  hotkeyCollisions: string[];
 }
 
 /** Full Import Preview payload pushed by the bridge after the user picks a .trprofile. */
@@ -688,7 +716,7 @@ export type IncomingMessage =
   | { type: 'button:states'; payload: ButtonStates }
   | { type: 'toolbar:updated'; payload: { profileName: string; actionCount: number } }
   | { type: 'statusbar:updated'; payload: { directory: string; profileName: string | null; actionCount: number } }
-  | { type: 'alert:show'; payload: { message: string; type?: 'success' | 'error' | 'info' } }
+  | { type: 'alert:show'; payload: { message: string; type?: 'success' | 'error' | 'info'; duration?: number } }
   | { type: 'windowTarget:detected'; payload: { processName: string; windowTitle: string } }
   | { type: 'windowTarget:detectState'; payload: { detecting: boolean } }
   | { type: 'windowTarget:testResult'; payload: { matches: boolean; foregroundProcess: string; foregroundTitle: string; error?: string } }
@@ -763,6 +791,21 @@ export type IncomingMessage =
   // shows the security warning if requiresAcknowledgement, then the Import Preview dialog,
   // then sends profile:confirmImport with the selected names.
   | { type: 'profile:importPreview'; payload: ImportPreviewPayload }
+  // Pushed INSTEAD of the alert:show toast when a confirmed import finished with
+  // anything worth reading (skips, renames, image failures, folder-target notes,
+  // hotkey collisions). A clean import keeps the plain success toast.
+  | { type: 'profile:importResult'; payload: ImportResultPayload }
+  // Pushed after a successful export — the frontend renders a success toast with a
+  // "Show in folder" action (file:revealExport echoes exportId; paths stay server-side,
+  // and the id pins each toast's action to the file THAT export wrote).
+  | { type: 'profile:exportResult'; payload: {
+      exportId: number;
+      fileName: string | null;
+      exportedCount: number;
+      requestedCount: number;
+      bundledDependencies: string[];
+      missingImages: number;
+    } }
   // Pushed in response to profile:getMetadata for the Info tab.
   | { type: 'profile:metadata'; payload: ProfileMetadataPayload }
   // Pushed in response to profile:listTags for the tag autocomplete.
@@ -1003,6 +1046,10 @@ export type OutgoingMessage =
   // warning or the Import Preview dialog). Tells the bridge to drop the server-side
   // parsed envelope so it doesn't linger in memory.
   | { type: 'profile:cancelImport'; payload: Record<string, never> }
+  // Reveal an exported .trprofile in Explorer. Carries only the exportId echoed from
+  // profile:exportResult — the id→path map stays server-side, so the frontend can
+  // never point explorer.exe at an arbitrary path.
+  | { type: 'file:revealExport'; payload: { exportId: number } }
   // Persists the "Don't show again" choice on the security warning so subsequent imports
   // skip the warning dialog.
   | { type: 'settings:acknowledgeImportWarning'; payload: Record<string, never> };

@@ -5,6 +5,7 @@ import { DialogShell } from './common/DialogShell';
 import { Button } from './common/Button';
 import { useBridge } from '../bridge/BridgeContext';
 import type { ProfileMetadataPayload, TagListEntry } from '../bridge/messageTypes';
+import { formatDateLong } from '../utils/dateFormat';
 
 interface ProfileInfoDialogProps {
   /** Profile name to edit metadata for. Triggers a profile:getMetadata fetch on mount. */
@@ -272,7 +273,7 @@ export function ProfileInfoDialog({ profileName, onClose }: ProfileInfoDialogPro
                       <button
                         type="button"
                         onClick={() => removeTag(t)}
-                        className="hover:text-amber-400 transition-colors"
+                        className="hover:text-warning-ink transition-colors"
                       >
                         <X size={10} />
                       </button>
@@ -358,19 +359,3 @@ function ReadOnlyField({ label, value, hint }: { label: string; value: string; h
   );
 }
 
-function formatDateLong(iso: string | null | undefined): string {
-  if (!iso) return 'Unknown';
-  try {
-    const d = new Date(iso);
-    if (isNaN(d.getTime())) return 'Unknown';
-    return d.toLocaleString(undefined, {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  } catch {
-    return 'Unknown';
-  }
-}

@@ -11,6 +11,10 @@ interface CheckboxProps {
   title?: string;
   /** Stop click from bubbling to parent (useful inside row/list items with their own onClick). */
   stopPropagation?: boolean;
+  /** Non-interactive: dimmed box + subtle border (two channels), clicks ignored.
+   *  Pair with `title` — [data-tip][disabled] keeps pointer-events alive so a
+   *  disabled box can still explain WHY it is off (the Button doctrine). */
+  disabled?: boolean;
   /** Extra classes on the outer button (typically for layout/spacing tweaks). */
   className?: string;
 }
@@ -21,7 +25,7 @@ interface CheckboxProps {
  *
  * Behavior (matches the original .checkbox-subtle style):
  *   - Unchecked: transparent fill + 1.5px border (subtle outline, blends with row bg)
- *   - Checked:   accent-solid fill with white check glyph
+ *   - Checked:   accent-solid fill, glyph in --color-accent-ink (contrast-picked per theme)
  *   - Indeterminate: accent fill, dash glyph (for partial-selection cases)
  */
 export function Checkbox({
@@ -31,6 +35,7 @@ export function Checkbox({
   label,
   title,
   stopPropagation,
+  disabled = false,
   className = '',
 }: CheckboxProps) {
   const filled = checked || !!indeterminate;
@@ -41,25 +46,35 @@ export function Checkbox({
   };
 
   return (
+    // Native `disabled` alone carries the whole disabled contract (no click dispatch
+    // in Chromium even with the [data-tip][disabled] pointer-events restore, and the
+    // state is exposed to AT) — same single mechanism Button.tsx relies on.
     <button
       type="button"
       role="checkbox"
       aria-checked={indeterminate ? 'mixed' : checked}
+      disabled={disabled}
       onClick={handleClick}
       data-tip={title}
-      className={`flex items-center gap-2 cursor-pointer select-none group ${className}`}
+      className={`flex items-center gap-2 select-none group ${
+        disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+      } ${className}`}
     >
       <span
         className={`w-3.5 h-3.5 rounded border-[1.5px] flex items-center justify-center transition-colors shrink-0 ${
           filled
             ? 'bg-accent-solid border-accent-solid'
-            : 'bg-transparent border-border-default group-hover:border-text-tertiary'
+            : disabled
+              ? 'bg-transparent border-border-subtle'
+              : 'bg-transparent border-border-default group-hover:border-text-tertiary'
         }`}
       >
+        {/* Glyph ink is contrast-picked per theme (accent-ink), never white: on a
+            light preset with a light accent-solid a white check disappears. */}
         {indeterminate ? (
-          <Minus size={10} strokeWidth={3} className="text-white" />
+          <Minus size={10} strokeWidth={3} className="text-[color:var(--color-accent-ink)]" />
         ) : checked ? (
-          <Check size={10} strokeWidth={3} className="text-white" />
+          <Check size={10} strokeWidth={3} className="text-[color:var(--color-accent-ink)]" />
         ) : null}
       </span>
       {label && (
@@ -93,9 +108,9 @@ export function CheckboxBox({
       }`}
     >
       {indeterminate ? (
-        <Minus size={10} strokeWidth={3} className="text-white" />
+        <Minus size={10} strokeWidth={3} className="text-[color:var(--color-accent-ink)]" />
       ) : checked ? (
-        <Check size={10} strokeWidth={3} className="text-white" />
+        <Check size={10} strokeWidth={3} className="text-[color:var(--color-accent-ink)]" />
       ) : null}
     </span>
   );

@@ -20,7 +20,10 @@ export interface SegmentOption<T extends string> {
 
 export interface SegmentedControlProps<T extends string> {
   options: SegmentOption<T>[];
-  value: T;
+  /** null = no segment active — the "mixed" state a bulk control shows while its
+   *  per-row children disagree; clicking a segment resets them all to that value.
+   *  Existing consumers pass a concrete T and are unaffected. */
+  value: T | null;
   onChange: (value: T) => void;
   ariaLabel: string;
   /** Stretch segments to share the track evenly (tab-bar style). */

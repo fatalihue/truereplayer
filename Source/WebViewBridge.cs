@@ -821,6 +821,7 @@ namespace TrueReplayer
                     case "profile:listTags": HandleProfileListTags(); break;
                     case "profile:confirmImport": HandleProfileConfirmImport(payload); break;
                     case "profile:cancelImport": HandleProfileCancelImport(); break;
+                    case "file:revealExport": HandleFileRevealExport(payload); break;
                     case "settings:acknowledgeImportWarning": HandleAcknowledgeImportWarning(); break;
                     case "profile:save": HandleProfileSave(); break;
                     case "profile:load": HandleProfileLoad(); break;
@@ -8355,18 +8356,8 @@ namespace TrueReplayer
             if (!string.IsNullOrEmpty(name))
             {
                 var entry = profileController.ProfileEntries.FirstOrDefault(p => p.Name == name);
-                if (entry != null && File.Exists(entry.FilePath))
-                {
-                    try
-                    {
-                        System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{entry.FilePath}\"");
-                    }
-                    catch (Exception ex)
-                    {
-                        DiagnosticLog.Error($"profile:openFolder failed to reveal '{entry.FilePath}'", ex);
-                        SendMessage("alert:show", new { message = "Could not open the profile folder" });
-                    }
-                }
+                if (entry != null)
+                    RevealInExplorer(entry.FilePath, "Could not open the profile folder");
                 return;
             }
 
@@ -8666,23 +8657,32 @@ namespace TrueReplayer
                     if (activeInExport && !await CheckUnsavedChangesAsync("exporting")) return;
                 }
 
-                var (exported, missingImages, bundledDependencies) = await profileController.ExportProfilesAsync(names, includeOrganization, includeDependencies);
+                var (exported, missingImages, bundledDependencies, savedPath) = await profileController.ExportProfilesAsync(names, includeOrganization, includeDependencies);
                 if (exported > 0)
                 {
-                    // `exported` can EXCEED names.Count when Include-dependencies pulled extra
-                    // sub-profiles in, so ">=" (not "==") is full success — otherwise the else
-                    // branch would render a negative "N could not be loaded".
-                    var msg = exported >= names.Count
-                        ? $"Exported {exported} profile(s) successfully."
-                        : $"Exported {exported} of {names.Count} profile(s); {names.Count - exported} could not be loaded.";
-                    // Name the sub-profiles Run Profile dragged in. This is the AUTHORITATIVE egress
-                    // disclosure — computed from what actually shipped, after any Save-on-export — so
-                    // it discloses a bundled (possibly private) sub-profile even in the cases where the
-                    // dialog's pre-export preview was stale (unsaved edit, rename mid-session, etc.).
-                    if (bundledDependencies.Count > 0)
-                        msg += $" Included {bundledDependencies.Count} referenced sub-profile(s): {string.Join(", ", bundledDependencies)}.";
-                    if (missingImages > 0) msg += $" {missingImages} reference image(s) were missing and not included.";
-                    SendMessage("alert:show", new { message = msg });
+                    // Register the file THIS export wrote under a fresh id — the toast's
+                    // "Show in folder" echoes the id, so stacked/paused older toasts keep
+                    // revealing THEIR file. Window of 8 comfortably outlives any toast.
+                    int exportId = ++_exportSeq;
+                    if (savedPath != null)
+                    {
+                        _recentExportPaths[exportId] = savedPath;
+                        _recentExportPaths.Remove(exportId - 8);
+                    }
+                    // Structured result → the frontend renders a success toast with a
+                    // "Show in folder" action. The bundled-dependency list stays the
+                    // AUTHORITATIVE egress disclosure — computed from what actually shipped,
+                    // after any Save-on-export — so it discloses a bundled (possibly private)
+                    // sub-profile even when the dialog's pre-export preview was stale.
+                    SendMessage("profile:exportResult", new
+                    {
+                        exportId,
+                        fileName = savedPath != null ? Path.GetFileName(savedPath) : null,
+                        exportedCount = exported,
+                        requestedCount = names.Count,
+                        bundledDependencies,
+                        missingImages,
+                    });
                 }
                 else if (exported == 0)
                     SendMessage("alert:show", new { message = "Export failed: none of the selected profiles could be loaded." });
@@ -8691,6 +8691,44 @@ namespace TrueReplayer
             catch (Exception ex)
             {
                 SendMessage("alert:show", new { message = $"Export failed: {ex.Message}" });
+            }
+        }
+
+        // Recent exports keyed by a monotonic id. Each export toast's "Show in folder"
+        // echoes ITS OWN id back, so an older still-visible toast (they live 6-8s and
+        // hover-pause indefinitely) can never reveal a NEWER export's file. Paths never
+        // cross the bridge: file:revealExport carries only the id, and only files this
+        // session's exports wrote can ever open.
+        private int _exportSeq;
+        private readonly Dictionary<int, string> _recentExportPaths = new();
+
+        /// <summary>
+        /// Opens Explorer with the identified export's .trprofile selected. The id→path
+        /// map is server-side only — the payload never carries a path.
+        /// </summary>
+        private void HandleFileRevealExport(JsonElement payload)
+        {
+            if (!payload.TryGetProperty("exportId", out var idProp) || !idProp.TryGetInt32(out int id)) return;
+            if (!_recentExportPaths.TryGetValue(id, out var path)) return;
+            RevealInExplorer(path, "Could not open the export folder");
+        }
+
+        /// <summary>
+        /// Explorer /select reveal shared by profile:openFolder and the export toast action.
+        /// One idiom, one failure policy: log + toast (a silent catch made a broken reveal
+        /// undiagnosable). /select keeps the path quoted — names carry spaces/accents.
+        /// </summary>
+        private void RevealInExplorer(string path, string failureMessage)
+        {
+            if (string.IsNullOrEmpty(path) || !File.Exists(path)) return;
+            try
+            {
+                System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{path}\"");
+            }
+            catch (Exception ex)
+            {
+                DiagnosticLog.Error($"Failed to reveal '{path}' in Explorer", ex);
+                SendMessage("alert:show", new { message = failureMessage });
             }
         }
 
@@ -8824,6 +8862,13 @@ namespace TrueReplayer
                     hotstring = p.CustomHotstring?.Sequence,
                     targetProcessName = p.TargetWindow?.ProcessName,
                     targetWindowTitle = p.TargetWindow?.WindowTitle,
+                    // Disclosure of what ALREADY travels in the envelope. The automation
+                    // trigger is imported DISARMED (DisarmedTriggerClone forces Armed=false),
+                    // which was 100% silent — receivers concluded the profile "doesn't work".
+                    // The data-loop row count rides for the same reason: 200 rows of the
+                    // sender's data should be visible before import, not discovered after.
+                    hasTrigger = p.Triggers != null,
+                    dataRowCount = p.Data?.Rows?.Count ?? 0,
                     dependencies,
                     // Conflict detection — the receiver may already have a profile with the same
                     // name. Surface that here so the dialog can show a "will be renamed" / "will
@@ -8928,7 +8973,7 @@ namespace TrueReplayer
 
             try
             {
-                var (imported, skipped, hasOrganization, imageFailureNames, writtenNames, adoptedFolderTargets, keptLocalFolderTargets) = await profileController.ConfirmImportAsync(
+                var (imported, skipped, hasOrganization, imageFailureNames, writtenNames, adoptedFolderTargets, keptLocalFolderTargets, renamedPairs) = await profileController.ConfirmImportAsync(
                     _pendingImportEnvelope, selectedNames, conflictResolutions);
                 // Names dropped at the bridge guard above never entered ConfirmImportAsync, so add
                 // them to the skipped total the user sees.
@@ -8975,49 +9020,58 @@ namespace TrueReplayer
                     }
 
                     PushProfilesUpdate();
-                    string msg = $"Imported {imported} profile(s).";
-                    if (totalSkipped > 0) msg += $" {totalSkipped} skipped.";
-                    if (imageFailureNames.Count > 0)
-                    {
-                        // Name the files that didn't restore (up to 3, each truncated — class-B names
-                        // come straight off the untrusted envelope). The per-file REASON is already in
-                        // the log (ImageStorageService logs it), so point there for the rest. Truncation
-                        // backs off a surrogate boundary so a non-BMP char in a hostile path can't leave
-                        // a lone surrogate in the toast.
-                        static string Trunc(string n)
-                        {
-                            if (n.Length <= 40) return n;
-                            int len = 39;
-                            if (char.IsHighSurrogate(n[len - 1])) len--;
-                            return n.Substring(0, len) + "…";
-                        }
-                        var shown = imageFailureNames.Take(3).Select(Trunc);
-                        msg += $" Reference image(s) not restored: {string.Join(", ", shown)}";
-                        if (imageFailureNames.Count > 3) msg += $", and {imageFailureNames.Count - 3} more";
-                        msg += " — see Logs for details.";
-                    }
-                    if (hasOrganization) msg += " Folder organization imported.";
-                    // A folder's window target decides which window every profile inside it acts
-                    // on, so filling one in silently is as bad as dropping it. Name the folders.
-                    if (adoptedFolderTargets.Count > 0)
-                        msg += $" Window target set on existing folder(s): {string.Join(", ", adoptedFolderTargets)}.";
-                    // The receiver's own target won. That is the right rule, but the imported
-                    // profiles now point at a DIFFERENT window than their author intended and will
-                    // run against it, so it cannot pass unsaid.
-                    if (keptLocalFolderTargets.Count > 0)
-                        msg += $" Kept your existing window target on folder(s): {string.Join(", ", keptLocalFolderTargets)}" +
-                               " — the imported profiles there will use YOUR target, not the sender's.";
-                    // Explicit toast type: a partial success (some images didn't restore) must NOT
-                    // render red — the frontend infers an error from words like "couldn't". 'info'
-                    // (neutral) for the warning case, 'success' (green) for a clean import.
-                    SendMessage("alert:show", new { message = msg, type = imageFailureNames.Count > 0 ? "info" : "success" });
 
-                    // Surface any hotkey collisions the imported profiles introduced with existing
-                    // ones — the hotkeys are already armed (RefreshProfileListAsync re-registered
-                    // them), but without this the colliding profiles would "silently fight" until
-                    // the next launch. Mirrors the assign-hotkey handler's drain.
-                    foreach (var collisionMsg in hotkeyCollisions)
-                        SendMessage("alert:show", new { message = collisionMsg });
+                    // A CLEAN import keeps the quiet success toast — the result dialog must never
+                    // punish the happy path with a third modal. Anything beyond a clean write goes
+                    // to the structured `profile:importResult` dialog instead: the old path squeezed
+                    // renames/images/folder-targets into one 300+ char string on a 3-second success
+                    // toast, and emitted each hotkey collision as a loose toast the frontend
+                    // word-sniffed red ("conflict"). The most consequential fact of the whole flow —
+                    // "the imported profiles there will use YOUR target, not the sender's" — had the
+                    // most ephemeral surface in the app.
+                    // Renames COUNT as warnings: Rename is the preview's DEFAULT resolution, so a
+                    // rename-only import is the single most common "worth reading" outcome — gating
+                    // it out would make the dialog's own rename section unreachable and leave the
+                    // user hunting for the profile under a name it didn't land under.
+                    bool hasWarnings = totalSkipped > 0
+                        || imageFailureNames.Count > 0
+                        || adoptedFolderTargets.Count > 0
+                        || keptLocalFolderTargets.Count > 0
+                        || hotkeyCollisions.Count > 0
+                        || renamedPairs.Count > 0;
+
+                    if (!hasWarnings)
+                    {
+                        string msg = $"Imported {imported} profile(s).";
+                        if (hasOrganization) msg += " Folder organization imported.";
+                        SendMessage("alert:show", new { message = msg, type = "success" });
+                    }
+                    else
+                    {
+                        SendMessage("profile:importResult", new
+                        {
+                            imported,
+                            // Final names as written (post-rename). Full names travel; the dialog
+                            // truncates via CSS, so the toast-era 40-char surrogate-safe truncation
+                            // is no longer needed here. renames are the EXACT collision pairs
+                            // ConfirmImportAsync recorded — never a set-difference heuristic, which
+                            // misread a ".json"-suffixed envelope entry as "name was taken".
+                            importedNames = writtenNames,
+                            renames = renamedPairs.Select(r => new { from = r.requested, to = r.final }).ToArray(),
+                            skipped = totalSkipped,
+                            // Per-file failure REASONS are already in the log (ImageStorageService
+                            // logs each one) — the dialog names the files and points at Logs.
+                            imageFailureNames,
+                            hasOrganization,
+                            adoptedFolderTargets,
+                            keptLocalFolderTargets,
+                            // Pre-composed strings (GetAndClearHotkeyCollisions' shape), grouped by
+                            // the dialog into one section instead of N loose toasts. The hotkeys are
+                            // already armed — without surfacing this the colliding profiles would
+                            // "silently fight" until the next launch.
+                            hotkeyCollisions,
+                        });
+                    }
                 }
                 else if (totalSkipped > 0)
                 {

@@ -1631,7 +1631,7 @@ namespace TrueReplayer.Controllers
         // any Save-on-export flushed the active profile, so it names exactly what left the machine
         // even when the dialog's pre-export "+N included" preview (built from a disk snapshot) was
         // stale. Empty when nothing extra rode along.
-        public async Task<(int exported, int missingImages, List<string> bundledDependencies)> ExportProfilesAsync(List<string> profileNames, bool includeOrganization = false, bool includeDependencies = false)
+        public async Task<(int exported, int missingImages, List<string> bundledDependencies, string? savedPath)> ExportProfilesAsync(List<string> profileNames, bool includeOrganization = false, bool includeDependencies = false)
         {
             var envelope = new ProfileExportEnvelope();
             // Original selection, captured before dependency expansion mutates profileNames, so we
@@ -1646,14 +1646,19 @@ namespace TrueReplayer.Controllers
             // reference PNG as base64 (the expensive part), so a cancel here must waste none of it.
             // defaultName comes from the SELECTED names; dependency expansion (if any) only grows the
             // count afterwards, so a single selection that pulls deps still names the sensible default.
-            var defaultName = profileNames.Count == 1 ? profileNames[0] : "profiles";
+            // Multi-profile default carries the date: the literal "profiles" made every successive
+            // export overwrite the previous one in the sender's Save dialog.
+            var defaultName = profileNames.Count == 1
+                ? profileNames[0]
+                : $"profiles-{DateTime.Now:yyyy-MM-dd}";
             var fileName = await ShowFileDialogAsync(new WinForms.SaveFileDialog
             {
+                Title = "Export profiles",
                 Filter = "TrueReplayer Profile (*.trprofile)|*.trprofile",
                 FileName = defaultName,
                 DefaultExt = "trprofile"
             }, "export profiles");
-            if (fileName == null) return (-1, 0, new List<string>());   // user cancelled the Save dialog — nothing built yet
+            if (fileName == null) return (-1, 0, new List<string>(), null);   // user cancelled the Save dialog — nothing built yet
 
             // Optionally pull in the sub-profiles this selection RunProfile-calls (transitive closure),
             // so a chain doesn't arrive broken at the receiver. After the dialog so a cancel costs nothing.
@@ -1764,7 +1769,7 @@ namespace TrueReplayer.Controllers
                 });
             }
 
-            if (envelope.Profiles.Count == 0) return (0, 0, new List<string>());   // none of the requested names loaded — distinct from cancel
+            if (envelope.Profiles.Count == 0) return (0, 0, new List<string>(), null);   // none of the requested names loaded — distinct from cancel
 
             if (includeOrganization)
             {
@@ -1811,7 +1816,9 @@ namespace TrueReplayer.Controllers
                 .Select(p => p.Name)
                 .Where(n => !seedNames.Contains(n))
                 .ToList();
-            return (envelope.Profiles.Count, missingImagePaths.Count, bundledDependencies);
+            // savedPath rides back so the bridge can offer "Show in folder" on the success
+            // toast — the reveal handler only ever opens the path the backend itself wrote.
+            return (envelope.Profiles.Count, missingImagePaths.Count, bundledDependencies, fileName);
         }
 
         /// <summary>
@@ -1827,10 +1834,18 @@ namespace TrueReplayer.Controllers
         /// </summary>
         public async Task<ImportPrepareResult> PrepareImportPreviewAsync()
         {
+            // Title + InitialDirectory: the .trprofile the user just received almost always
+            // sits in Downloads, and the untitled picker opened wherever Windows last was.
+            // Honest caveat: Windows honours InitialDirectory only until this app has a
+            // last-visited MRU folder for the dialog — after the first pick, the MRU wins.
+            // Still worth it: it fixes exactly the first-run case where the user is most
+            // lost. A null Downloads (shell refusal) leaves the default behavior.
             var fileName = await ShowFileDialogAsync(new WinForms.OpenFileDialog
             {
+                Title = "Import profiles",
                 Filter = "TrueReplayer Profile (*.trprofile)|*.trprofile",
-                DefaultExt = "trprofile"
+                DefaultExt = "trprofile",
+                InitialDirectory = Interop.NativeMethods.TryGetDownloadsFolder() ?? string.Empty
             }, "import profiles");
 
             if (fileName == null) return new ImportPrepareResult(ImportPrepareStatus.Cancelled, null, null, null);
@@ -1922,7 +1937,7 @@ namespace TrueReplayer.Controllers
             return finalName;
         }
 
-        public async Task<(int imported, int skipped, bool hasOrganization, List<string> imageFailureNames, List<string> writtenNames, List<string> adoptedFolderTargets, List<string> keptLocalFolderTargets)> ConfirmImportAsync(
+        public async Task<(int imported, int skipped, bool hasOrganization, List<string> imageFailureNames, List<string> writtenNames, List<string> adoptedFolderTargets, List<string> keptLocalFolderTargets, List<(string requested, string final)> renamedPairs)> ConfirmImportAsync(
             ProfileExportEnvelope envelope,
             HashSet<string> selectedNames,
             Dictionary<string, ImportConflictResult> conflictResolutions)
@@ -1978,6 +1993,11 @@ namespace TrueReplayer.Controllers
             // re-pinned under their new name (BUG3 fix). Ordinal-ignore-case so org name lookups match
             // regardless of casing, mirroring allocatedNames / onDisk.
             var importedRenames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            // COLLISION renames only, for the user-facing result disclosure: (post-.json-strip
+            // requested name, allocated "name (N)"). Deliberately NOT derived from importedRenames,
+            // whose keys are raw envelope names — "Farm.json" → "Farm" is a suffix strip, not a
+            // collision, and must not be reported as "name was taken".
+            var renamedPairs = new List<(string requested, string final)>();
 
             // Every profile this batch actually wrote, kept for the RunProfile reference remap that
             // runs after the loop (see below). Held purely to avoid re-reading what we just wrote —
@@ -2190,6 +2210,12 @@ namespace TrueReplayer.Controllers
                 // "keep mine" ref correctly keeps pointing at the recipient's local copy.
                 if (!string.Equals(entry.Name, finalName, StringComparison.Ordinal))
                     renamedTargets[entry.Name] = finalName;
+                // importName (post-strip) vs finalName differs ONLY when AllocateImportName bumped
+                // a collision — exactly the "landed under a different name" fact the result dialog
+                // must disclose. renamedTargets above can't serve here: its key is the RAW envelope
+                // name, so a mere ".json" strip would read as a rename.
+                if (!string.Equals(importName, finalName, StringComparison.Ordinal))
+                    renamedPairs.Add((importName, finalName));
                 }
                 catch (Exception ex)
                 {
@@ -2291,7 +2317,7 @@ namespace TrueReplayer.Controllers
             // bumped it to "name (N)"). The bridge uses this to detect whether the profile
             // currently loaded in the grid was overwritten, so it can reload it instead of
             // leaving a stale in-memory copy that a later Save would clobber the import with.
-            return (imported, skipped, hasOrganization, imageFailureNames, importedRenames.Values.ToList(), adoptedFolderTargets, keptLocalFolderTargets);
+            return (imported, skipped, hasOrganization, imageFailureNames, importedRenames.Values.ToList(), adoptedFolderTargets, keptLocalFolderTargets, renamedPairs);
         }
 
         // Delegates to the shared validator (single owner for this security/data-loss check —

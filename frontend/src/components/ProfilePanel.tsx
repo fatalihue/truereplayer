@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, lazy, Suspense } from 'react';
-import { Search, SearchX, X, Pencil, Copy, Trash2, FolderOpen, FolderMinus, Keyboard, Crosshair, ArrowLeftRight, Type, Ban, ChevronsLeft, ChevronsRight, ChevronsDownUp, ChevronsUpDown, Pin, PinOff, FolderPlus, FilePlus, ChevronRight, ChevronDown, Palette, ArrowRightFromLine, Zap, Repeat, Repeat2, Hourglass, ArrowUpFromDot, ExternalLink, Info, MoreHorizontal, Hash, Upload, Check } from 'lucide-react';
-import type { ProfileEntry, ImportPreviewPayload, ImportConflictResolution, TriggerMode } from '../bridge/messageTypes';
+import { Search, SearchX, X, Pencil, Copy, Trash2, FolderOpen, FolderMinus, Keyboard, Crosshair, ArrowLeftRight, Type, Ban, ChevronsLeft, ChevronsRight, ChevronsDownUp, ChevronsUpDown, Pin, PinOff, FolderPlus, FilePlus, ChevronRight, ChevronDown, Palette, ArrowRightFromLine, Zap, Repeat, Repeat2, Hourglass, ArrowUpFromDot, ExternalLink, Info, MoreHorizontal, Hash, Upload, Download, Check } from 'lucide-react';
+import type { ProfileEntry, ImportPreviewPayload, ImportResultPayload, ImportConflictResolution, TriggerMode } from '../bridge/messageTypes';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { KbdTag } from './common/KbdTag';
@@ -11,6 +11,7 @@ import { Button } from './common/Button';
 import { TargetConfigDialog } from './TargetConfigDialog';
 import { SecurityWarningModal } from './SecurityWarningModal';
 import { ImportPreviewDialog } from './ImportPreviewDialog';
+import { ImportResultDialog } from './ImportResultDialog';
 // Deferred: the only other eager consumer of emoji-picker-react, in a dialog opened on demand.
 const ProfileInfoDialog = lazy(() => import('./ProfileInfoDialog').then(m => ({ default: m.ProfileInfoDialog })));
 import { useToast } from '../state/ToastContext';
@@ -342,6 +343,9 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   const [securityWarningOpen, setSecurityWarningOpen] = useState(false);
   const [pendingPreview, setPendingPreview] = useState<ImportPreviewPayload | null>(null);
   const [importPreview, setImportPreview] = useState<ImportPreviewPayload | null>(null);
+  // Post-import result dialog — only pushed by the backend when the import finished
+  // with something worth reading; a clean import stays a plain success toast.
+  const [importResult, setImportResult] = useState<ImportResultPayload | null>(null);
 
   // Info dialog — opened from the profile context menu, edits sharing metadata.
   const [showInfoDialog, setShowInfoDialog] = useState<string | null>(null);
@@ -350,7 +354,10 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     send({ type: 'profile:import', payload: {} });
   };
 
-  // Listen for the preview message and route through the warning if needed.
+  // Listen for the preview message and route through the warning if needed; the
+  // post-import result lands here too (its dialog lives in this component). The
+  // export toast, by contrast, is composed in ToastContext with the other
+  // backend-push toasts — palette exports must not depend on this panel.
   useEffect(() => {
     return subscribe((msg) => {
       if (msg.type === 'profile:importPreview') {
@@ -360,6 +367,8 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
         } else {
           setImportPreview(msg.payload);
         }
+      } else if (msg.type === 'profile:importResult') {
+        setImportResult(msg.payload);
       }
     });
   }, [subscribe]);
@@ -1857,17 +1866,22 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
           </>
         ) : (
           <>
-        {/* px-2 not px-3, and the buttons are w-6: six of them plus two dividers plus the
-            PROFILES label do not fit a 260 px panel at the old sizes. Measured after the
-            change so nothing clips. */}
+        {/* px-2 not px-3, and the buttons are w-6: SEVEN of them plus two dividers plus
+            the PROFILES label share a 260 px panel — the 7th (Import) ate the slack the
+            six-button layout had, so the divider margins dropped mx-1 → mx-0.5 to pay
+            for it. Estimated, not yet re-measured live (UI is screenshot-masked); if
+            PROFILES clips, shorten the label before shrinking the buttons. */}
         <div className="flex items-center justify-between px-2 pt-2 pb-1">
           <span className="label-micro text-text-tertiary">PROFILES</span>
           {/* Grouped by function (2026-07 reorg), Toolbar divider idiom: panel chrome
-              (collapse) | library utilities (open folder, export) | creation (new
-              folder, new profile — hottest spot, at the end). Export uses Upload, the
-              same glyph the Command Palette uses for "Export All Profiles"; the old
-              ArrowLeftRight read as "convert/swap" (it still marks the coordinate
-              converters in the context menu, where that meaning is right). */}
+              (collapse) | library utilities (open folder, export, import) | creation
+              (new folder, new profile — hottest spot, at the end). Export uses Upload,
+              the same glyph the Command Palette uses for "Export All Profiles"; Import
+              is its mirror (Download, the palette's Import glyph) — it used to live
+              ONLY inside the Export dialog's footer, where nobody looking to import
+              would think to open it. The old ArrowLeftRight read as "convert/swap"
+              (it still marks the coordinate converters in the context menu, where
+              that meaning is right). */}
           <div className="flex items-center">
             <button onClick={onToggleCollapse} className="w-6 h-6 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors" data-tip={tt('Collapse panel', 'Colapsar painel')}>
               <ChevronsLeft size={14} />
@@ -1894,14 +1908,17 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                 </button>
               );
             })()}
-            <div className="w-px h-3.5 bg-border-subtle mx-1" />
+            <div className="w-px h-3.5 bg-border-subtle mx-0.5" />
             <button onClick={handleOpenProfilesFolder} className="w-6 h-6 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors" data-tip={tt('Open profiles folder', 'Abrir pasta de perfis')}>
               <ExternalLink size={14} />
             </button>
             <button onClick={handleExportClick} className="w-6 h-6 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors" data-tip={tt('Export profiles', 'Exportar perfis')}>
               <Upload size={14} />
             </button>
-            <div className="w-px h-3.5 bg-border-subtle mx-1" />
+            <button onClick={handleImportClick} className="w-6 h-6 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors" data-tip={tt('Import profiles', 'Importar perfis')}>
+              <Download size={14} />
+            </button>
+            <div className="w-px h-3.5 bg-border-subtle mx-0.5" />
             <button onClick={handleCreateFolder} className="w-6 h-6 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors" data-tip={tt('New folder', 'Nova pasta')}>
               <FolderPlus size={14} />
             </button>
@@ -2799,13 +2816,13 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                 >
                   Cancel
                 </button>
-                <button
+                <Button
+                  variant="primary"
                   onClick={confirmHotstring}
                   disabled={hotstringValue.trim().length < 2}
-                  className="px-4 py-1.5 text-xs text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-40"
                 >
                   Assign
-                </button>
+                </Button>
               </div>
             </div>
           </div>
@@ -2815,11 +2832,26 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
       {/* Export Profiles Dialog */}
       {showExportDialog && (() => {
         const matchesExport = (name: string) => !exportSearch || name.toLowerCase().includes(exportSearch.toLowerCase());
-        // Per-profile action count on the right of each row — mirrors the Import Preview's "N actions".
-        const countBadge = (name: string) => {
-          const ac = profiles.find(x => x.name === name)?.actionCount;
-          return ac === undefined ? null : (
-            <span className="ml-auto shrink-0 text-[10px] text-text-disabled">{ac} action{ac === 1 ? '' : 's'}</span>
+        // One lookup table per render — a profiles.find per row was O(n²) over ~81 profiles.
+        const profileByName = new Map(profiles.map(p => [p.name, p]));
+        // Row anatomy mirrors the Import Preview: emoji identity up front, hotkey +
+        // action count as right-aligned metadata. Tertiary, not disabled — disabled
+        // ink is for switched-off controls, this is informative text.
+        const rowEmoji = (name: string) => (
+          <span className="w-4 text-center text-sm leading-none select-none shrink-0">
+            {profileByName.get(name)?.iconEmoji || '📄'}
+          </span>
+        );
+        const rowMeta = (name: string) => {
+          const p = profileByName.get(name);
+          if (!p) return null;
+          return (
+            <span className="ml-auto shrink-0 flex items-center gap-1.5">
+              {p.hotkey && <KbdTag combo={p.hotkey} unified />}
+              {p.actionCount !== undefined && (
+                <span className="text-[10px] text-text-tertiary">{p.actionCount} action{p.actionCount === 1 ? '' : 's'}</span>
+              )}
+            </span>
           );
         };
         const folders = (profileOrder?.folders ?? []).filter(f => f.items.some(matchesExport));
@@ -2845,28 +2877,35 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
           <DialogShell
             icon={<Upload size={14} style={{ color: 'var(--color-accent)' }} />}
             title="Export Profiles"
-            widthClass="w-[380px] max-h-[85vh]"
+            // 460px: still deliberately narrower than the Import Preview's 640 (export is a
+            // light picker, import is a review), but no longer the only dialog UNDER the
+            // shell's 440 default while serving the app's longest list (~81 profiles with
+            // folder indentation truncating PT-BR names early at 380).
+            widthClass="w-[460px] max-h-[90vh]"
             onClose={() => setShowExportDialog(false)}
             // Don't discard a multi-profile selection on a stray outside click, matching the
             // Import Preview dialog.
             closeOnBackdrop={false}
             footerHint={
-              <>
-                {totalSelectedCount} selected
-                {hiddenSelectedCount > 0 && <> · {hiddenSelectedCount} hidden by filter</>}
-              </>
+              // The Import cross-link rides the LEFT slot, a ghost far away from the
+              // Cancel/Export pair — it used to sit flush against them, where a misclick
+              // silently discarded a curated multi-profile selection.
+              <span className="flex items-center gap-3">
+                <Button
+                  variant="ghost"
+                  onClick={() => { handleImportClick(); setShowExportDialog(false); }}
+                  data-tip={tt('Opens a file picker — closes this dialog.', 'Abre um seletor de arquivo — fecha este diálogo.')}
+                >
+                  Import…
+                </Button>
+                <span>
+                  {totalSelectedCount} selected
+                  {hiddenSelectedCount > 0 && <> · {hiddenSelectedCount} hidden by filter</>}
+                </span>
+              </span>
             }
             footer={
               <>
-                {/* Secondary entry point — importing is the inverse of this dialog. All three
-                    share min-w so the footer reads as an even button row. */}
-                <Button
-                  variant="secondary"
-                  className="min-w-[84px]"
-                  onClick={() => { handleImportClick(); setShowExportDialog(false); }}
-                >
-                  Import
-                </Button>
                 <Button variant="secondary" className="min-w-[84px]" onClick={() => setShowExportDialog(false)}>Cancel</Button>
                 <Button
                   variant="primary"
@@ -2879,19 +2918,25 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               </>
             }
           >
-            {/* Search */}
+            {/* Search — focus ring + aria parity with ProfileSearchList, which this
+                hand-rolled field had drifted from. */}
             <div className="px-4 pt-3">
-              <div className="flex items-center gap-2 px-2.5 py-1.5 bg-bg-input border border-border-default rounded">
+              <div className="flex items-center gap-2 px-2.5 py-1.5 bg-bg-input border border-border-default rounded focus-within:border-accent-solid transition-colors">
                 <Search size={12} className="text-text-disabled shrink-0" />
                 <input
                   type="text"
                   placeholder="Filter profiles..."
+                  aria-label={tt('Filter profiles', 'Filtrar perfis')}
                   value={exportSearch}
                   onChange={(e) => setExportSearch(e.target.value)}
                   className="bg-transparent text-xs text-text-primary placeholder:text-text-disabled outline-none flex-1 min-w-0"
                 />
                 {exportSearch && (
-                  <button onClick={() => setExportSearch('')} className="text-text-disabled hover:text-text-secondary transition-colors shrink-0">
+                  <button
+                    onClick={() => setExportSearch('')}
+                    aria-label={tt('Clear filter', 'Limpar filtro')}
+                    className="text-text-disabled hover:text-text-secondary transition-colors shrink-0"
+                  >
                     <X size={11} />
                   </button>
                 )}
@@ -2900,19 +2945,33 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
 
             {/* Select All (visible) */}
             <div className="px-4 pt-2">
+              {/* hover is bg-surface, NOT bg-elevated: the DialogShell card is itself
+                  bg-elevated, so the old hover painted the same color — no feedback. */}
               <button
                 type="button"
                 onClick={toggleExportSelectAll}
-                className="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-bg-elevated cursor-pointer border-b border-border-subtle text-left"
+                className="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-bg-surface cursor-pointer border-b border-border-subtle text-left"
               >
                 <CheckboxBox checked={allExportSelected} />
                 <span className="text-xs font-medium text-text-secondary">Select All</span>
-                <span className="ml-auto text-[10px] text-text-disabled">{selectedCount}/{visibleNames.length}</span>
+                <span className="ml-auto text-[10px] text-text-tertiary">{selectedCount}/{visibleNames.length}</span>
               </button>
             </div>
 
             {/* Scrollable list organized by folders */}
             <div className="flex-1 overflow-y-auto px-4 py-1 min-h-[160px]">
+              {/* Empty states — the old dialog rendered mute whitespace here, which read
+                  as broken when a filter matched nothing. */}
+              {visibleNames.length === 0 && (
+                <div className="py-6 flex flex-col items-center gap-2 text-[11px] text-text-tertiary">
+                  <span>
+                    {profiles.length === 0 ? 'No profiles to export.' : `No profiles match "${exportSearch}"`}
+                  </span>
+                  {exportSearch && (
+                    <Button variant="ghost" onClick={() => setExportSearch('')}>Clear filter</Button>
+                  )}
+                </div>
+              )}
               {/* Pinned (not in folders) */}
               {pinned.length > 0 && (
                 <div className="mb-1">
@@ -2922,11 +2981,12 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                       key={name}
                       type="button"
                       onClick={() => toggleExportProfile(name)}
-                      className="w-full flex items-center gap-2 px-2 py-1 rounded hover:bg-bg-elevated cursor-pointer text-left"
+                      className="w-full flex items-center gap-2 px-2 py-1 rounded hover:bg-bg-surface cursor-pointer text-left"
                     >
                       <CheckboxBox checked={!!exportSelection[name]} />
+                      {rowEmoji(name)}
                       <span className="text-xs text-text-primary truncate">{name}</span>
-                      {countBadge(name)}
+                      {rowMeta(name)}
                     </button>
                   ))}
                 </div>
@@ -2942,7 +3002,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                     <button
                       type="button"
                       onClick={() => toggleExportFolder(visibleItems)}
-                      className="w-full flex items-center gap-1.5 px-2 py-1 rounded hover:bg-bg-elevated cursor-pointer text-left"
+                      className="w-full flex items-center gap-1.5 px-2 py-1 rounded hover:bg-bg-surface cursor-pointer text-left"
                     >
                       <CheckboxBox
                         checked={folderAllSelected}
@@ -2950,7 +3010,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                       />
                       <FolderOpen size={12} style={{ color: f.color }} className="shrink-0" />
                       <span className="text-xs font-medium text-text-secondary truncate">{f.name}</span>
-                      <span className="ml-auto text-[10px] text-text-disabled">{visibleItems.filter(n => exportSelection[n]).length}/{visibleItems.length}</span>
+                      <span className="ml-auto text-[10px] text-text-tertiary">{visibleItems.filter(n => exportSelection[n]).length}/{visibleItems.length}</span>
                     </button>
                     <div className="ml-5">
                       {visibleItems.map(name => (
@@ -2958,11 +3018,12 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                           key={name}
                           type="button"
                           onClick={() => toggleExportProfile(name)}
-                          className="w-full flex items-center gap-2 px-2 py-1 rounded hover:bg-bg-elevated cursor-pointer text-left"
+                          className="w-full flex items-center gap-2 px-2 py-1 rounded hover:bg-bg-surface cursor-pointer text-left"
                         >
                           <CheckboxBox checked={!!exportSelection[name]} />
+                          {rowEmoji(name)}
                           <span className="text-xs text-text-primary truncate">{name}</span>
-                          {countBadge(name)}
+                          {rowMeta(name)}
                         </button>
                       ))}
                     </div>
@@ -2979,11 +3040,12 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                       key={p.name}
                       type="button"
                       onClick={() => toggleExportProfile(p.name)}
-                      className="w-full flex items-center gap-2 px-2 py-1 rounded hover:bg-bg-elevated cursor-pointer text-left"
+                      className="w-full flex items-center gap-2 px-2 py-1 rounded hover:bg-bg-surface cursor-pointer text-left"
                     >
                       <CheckboxBox checked={!!exportSelection[p.name]} />
+                      {rowEmoji(p.name)}
                       <span className="text-xs text-text-primary truncate">{p.name}</span>
-                      {countBadge(p.name)}
+                      {rowMeta(p.name)}
                     </button>
                   ))}
                 </div>
@@ -3312,8 +3374,16 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
           importPreview until the warning is dismissed). */}
       {securityWarningOpen && (
         <SecurityWarningModal
+          fileName={pendingPreview?.fileName}
+          profileCount={pendingPreview?.profiles.length}
           onContinue={handleSecurityContinue}
           onCancel={handleSecurityCancel}
+        />
+      )}
+      {importResult && (
+        <ImportResultDialog
+          result={importResult}
+          onClose={() => setImportResult(null)}
         />
       )}
       {importPreview && !securityWarningOpen && (

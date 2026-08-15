@@ -51,6 +51,12 @@
      migration toasts). Was ~10 scattered #FFC107 literals; consumers use
      text-warning / border-warning/N / bg-warning/N or color-mix derivations. */
   --color-warning: #FFC107;
+  /* Ink for warning TEXT on any surface — the hue pulled 40% toward the theme's
+     text (the loop-unsaved-dot recipe below: 2.97:1 on the 11 light presets,
+     6.74:1 on dark, measured with the repo's contrastRatio). Raw --color-warning
+     is for shapes, borders and translucent tints only; yellow text dies on light
+     presets. References vars, so it re-resolves per theme with no themes.ts row. */
+  --color-warning-ink: color-mix(in srgb, var(--color-warning) 40%, var(--color-text-primary));
 
   /* Static fallback for the UI zoom, overwritten by applyTheme on every theme apply.
      Must exist here too: a `calc(... / var(--ui-zoom))` with the var unset is an INVALID
@@ -537,6 +543,16 @@ html[data-animations="true"] .replay-btn-glow {
   border-radius: 50%;
   background: color-mix(in srgb, var(--color-warning) 40%, var(--color-text-primary));
   box-shadow: 0 0 0 2px var(--color-bg-surface);
+}
+
+/* WARNING BAND — the one idiom for "these lines carry a caution": left rule in the
+   raw hue + an 8% translucent tint that survives all presets, light and dark
+   (KeystrokeCaptureDialog established it; the import/export dialogs share it via
+   this class so the tint can never drift per-copy). Pair the text inside with
+   text-warning-ink; the raw hue is for the rule/shapes only. */
+.warning-band {
+  border-left: 2px solid var(--color-warning);
+  background: color-mix(in srgb, var(--color-warning) 8%, transparent);
 }
 
 /* REPLAY progress line — an indeterminate "running" indicator that sweeps a
