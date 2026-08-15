@@ -2299,13 +2299,26 @@ namespace TrueReplayer.Services
             }
         }
 
-        // Actions whose execution time IS the feature — they wait for something (a screen
-        // state, a hotkey, a sub-profile, a browser round-trip) — as opposed to schedule
-        // debt the deadline scheduler in ExecuteActionsAsync should catch up on. After one
-        // of these the scheduler resyncs instead of compressing the next action's delay.
+        // Actions whose execution time IS the feature — as opposed to schedule debt the
+        // deadline scheduler in ExecuteActionsAsync should catch up on. After one of these
+        // the scheduler resyncs instead of compressing the next action's delay.
+        //
+        // The test is NOT "does it take a while", it is "is the time imposed from OUTSIDE
+        // this process". Two families qualify, and missing the second one shipped a real
+        // regression in 2.18.0:
+        //   1. Waiting on a state: a screen match, a hotkey, a sub-profile, a browser round-trip.
+        //   2. Handing work to ANOTHER app and letting it settle — the recorded gap never
+        //      contained this cost, because at RECORD time no such handoff happened. SendText
+        //      pastes via the clipboard and sleeps 50 ms twice (set the clipboard, then let the
+        //      target ingest Ctrl+V); ActivateWindow polls up to its Timeout for the window to
+        //      come up; CopyToSlot fires Ctrl+C and polls up to 750 ms for the target to render
+        //      the copy. Compressing the next delay into those made a click land on a UI that
+        //      had not caught up yet — reported from the field on SendText → click macros, and
+        //      it does not need a LARGE text to happen: the settle cost is fixed.
         private static readonly HashSet<string> LongWaitActionTypes = new(StringComparer.OrdinalIgnoreCase)
         {
             "WaitImage", "WaitPixelColor", "Pause", "RunProfile", "HoldKey",
+            "SendText", "ActivateWindow", "CopyToSlot",
         };
 
         // Browser actions all round-trip the extension pipe with a multi-second timeout, so
