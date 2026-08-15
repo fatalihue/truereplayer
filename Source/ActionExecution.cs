@@ -2299,22 +2299,34 @@ namespace TrueReplayer.Services
             }
         }
 
-        // Actions whose execution time IS the feature — as opposed to schedule debt the
-        // deadline scheduler in ExecuteActionsAsync should catch up on. After one of these
-        // the scheduler resyncs instead of compressing the next action's delay.
+        // Actions after which the deadline scheduler must RESYNC rather than compress the next
+        // action's delay. The test that covers every case is neither "does it take a while" nor
+        // "is the time imposed from outside this process" — it is:
         //
-        // The test is NOT "does it take a while", it is "is the time imposed from OUTSIDE
-        // this process". Two families qualify, and missing the second one shipped a real
-        // regression in 2.18.0:
-        //   1. Waiting on a state: a screen match, a hotkey, a sub-profile, a browser round-trip.
-        //   2. Handing work to ANOTHER app and letting it settle — the recorded gap never
-        //      contained this cost, because at RECORD time no such handoff happened. SendText
-        //      pastes via the clipboard and sleeps 50 ms twice (set the clipboard, then let the
-        //      target ingest Ctrl+V); ActivateWindow polls up to its Timeout for the window to
-        //      come up; CopyToSlot fires Ctrl+C and polls up to 750 ms for the target to render
-        //      the copy. Compressing the next delay into those made a click land on a UI that
-        //      had not caught up yet — reported from the field on SendText → click macros, and
-        //      it does not need a LARGE text to happen: the settle cost is fixed.
+        //     was this time ever part of the gap the user RECORDED?
+        //
+        // If it was, absorbing it is the entire point of deadline scheduling: a click's own
+        // travel time sat inside the recorded gap, so the next delay should eat it. If it was
+        // not, absorbing it silently deletes settle time the macro depends on. Three families
+        // fail that test, and 2.18.0 shipped covering only the first:
+        //
+        //   1. Waiting on a state — WaitImage, WaitPixelColor, Pause, RunProfile, HoldKey and
+        //      Browser* (pipe round-trip), plus a timed If/Assert polling window.
+        //   2. Handing work to ANOTHER app and letting it settle. At record time no such
+        //      handoff happened, so the recorded gap cannot contain it: SendText pastes via the
+        //      clipboard and sleeps 50 ms twice (settle, Ctrl+V, ingest); ActivateWindow polls
+        //      up to its Timeout for the window to come up; CopyToSlot fires Ctrl+C and polls
+        //      up to 750 ms for the target to render the copy. Field-reported on SendText →
+        //      click macros, and it needs no LARGE text — the settle cost is fixed.
+        //   3. Durations authored AFTER recording. A repeat burst (Times > 1) spends
+        //      (N-1) × RepeatDelayMs between cycles, but the recording held ONE click, so that
+        //      time was never in the gap either. Found on real game macros whose bursts burn
+        //      350-800 ms ahead of a recorded 350 ms delay — same failure as family 2, another
+        //      door. This is also why HoldKey belongs in family 1 instead of looking like an
+        //      oddity there: its duration is authored, not recorded.
+        //
+        // Resyncing after an action that consumed nothing is inert: the action starts AT its
+        // deadline, so elapsed >= nextTickMs already and the assignment changes nothing.
         private static readonly HashSet<string> LongWaitActionTypes = new(StringComparer.OrdinalIgnoreCase)
         {
             "WaitImage", "WaitPixelColor", "Pause", "RunProfile", "HoldKey",
@@ -2328,6 +2340,17 @@ namespace TrueReplayer.Services
             actionType != null
             && (LongWaitActionTypes.Contains(actionType)
                 || actionType.StartsWith("Browser", StringComparison.OrdinalIgnoreCase));
+
+        // The per-ACTION half of the rule above: family 3 (a repeat burst) and the timed Assert
+        // are properties of the row, not of its type, so they cannot live in the set.
+        // Assert shares EvaluateConditionWithTimeout with If — a timed Assert polls exactly like
+        // one — but it runs through the action switch, where the If's own resync cannot reach it
+        // (If rows `continue` out of the loop body before the switch and resync there instead).
+        private static bool ShouldResyncAfter(ActionItem action) =>
+            IsLongWaitAction(action.ActionType)
+            || action.RepeatCount > 1
+            || (action.ConditionTimeout > 0
+                && string.Equals(action.ActionType, "Assert", StringComparison.OrdinalIgnoreCase));
 
         private async Task ExecuteActionsAsync(List<ActionItem> actions, CancellationToken token)
         {
@@ -2722,7 +2745,7 @@ namespace TrueReplayer.Services
                 // the NEXT action's delay runs in full: users configure that delay as a
                 // settle period after the wait, and deadline scheduling would otherwise
                 // compress it to zero.
-                if (IsLongWaitAction(action.ActionType))
+                if (ShouldResyncAfter(action))
                     nextTickMs = sw.ElapsedMilliseconds;
             }
         }
