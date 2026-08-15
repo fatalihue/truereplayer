@@ -888,12 +888,19 @@ export function Toolbar(_props: ToolbarProps) {
 
           {/* Data Loop — open the data-table panel ({row:column} tokens + loop-over-data).
               A profile-level surface (App-level, opened via the shared cmd:dataeditor
-              event), not an inserted row — so it's enabled regardless of clicker mode. */}
+              event) rather than an inserted row, which is why it used to stay live in
+              Clicker mode. That was wrong: the table only feeds {row:column} tokens,
+              which only macro rows read, and Clicker mode has no profile at all (see the
+              Ctrl+S toast above). Opening it there edits data nothing can consume, so it
+              takes the same gate as every other macro-facing control. The toolbar is its
+              ONLY entry point — it is deliberately absent from the command palette — so
+              this gate is the whole story. */}
           <button
             tabIndex={-1}
             onClick={() => window.dispatchEvent(new CustomEvent('cmd:dataeditor'))}
-            className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-            data-tip="Data Loop"
+            disabled={isClicker}
+            className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
+            data-tip={clickerTip('Data Loop', 'Data Loop')}
           >
             <Table2 size={14} />
           </button>
