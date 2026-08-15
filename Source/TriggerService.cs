@@ -534,6 +534,9 @@ namespace TrueReplayer.Services
             System.Text.RegularExpressions.Regex? titleRegex = null;
             // PixelColorMatch: a Trim + 3 Substring + 3 Convert.ToInt32 per tick otherwise.
             System.Drawing.Color? pixelColor = null;
+            // ImageFound: optional ROI — constrain the scan to a sub-rect (cheaper + fewer false
+            // positives for a background poll). Absolute coords; no offset translation.
+            System.Drawing.Rectangle? searchRegion = null;
             try
             {
                 if (kind == "windowopen")
@@ -558,13 +561,21 @@ namespace TrueReplayer.Services
                         return;
                     }
                     templateMat = ScreenCaptureService.BitmapToMat(refImage);
+                    if (cfg.SearchRegionW is int sw && cfg.SearchRegionH is int sh && sw > 0 && sh > 0)
+                        searchRegion = new System.Drawing.Rectangle(cfg.SearchRegionX ?? 0, cfg.SearchRegionY ?? 0, sw, sh);
                 }
+
+                // Only the FIRST probe may report an unusable search region: the region is fixed
+                // for the loop's lifetime, so the verdict can't change between polls — same gate
+                // WaitForImageAsync keeps for its own poll loop (ImageMatchingService.cs).
+                bool reportRegion = true;
 
                 // Seed the edge state with an INITIAL probe: a condition that is already true
                 // when the loop starts is NOT an edge. Without this, every config edit (which
                 // restarts the loop) — or arming while the condition holds — auto-fired within
                 // one poll. Cooldown lives in TriggerStats so it also survives loop restarts.
-                bool wasTrue = ProbeCondition(cfg, kind, windowTarget, titleRegex, pixelColor, templateMat);
+                bool wasTrue = ProbeCondition(cfg, kind, windowTarget, titleRegex, pixelColor, templateMat, searchRegion, reportRegion);
+                reportRegion = false;
                 rt.ConditionTrue = wasTrue;
                 if (wasTrue) NotifyStateChanged();
                 bool pending = false;
@@ -576,7 +587,7 @@ namespace TrueReplayer.Services
                 {
                     await Task.Delay(pollMs, ct);
 
-                    bool isTrue = ProbeCondition(cfg, kind, windowTarget, titleRegex, pixelColor, templateMat);
+                    bool isTrue = ProbeCondition(cfg, kind, windowTarget, titleRegex, pixelColor, templateMat, searchRegion, reportRegion);
                     if (isTrue != rt.ConditionTrue)
                     {
                         rt.ConditionTrue = isTrue;
@@ -779,9 +790,11 @@ namespace TrueReplayer.Services
         /// <remarks>
         /// Everything after <paramref name="cfg"/> is precomputed ONCE by the caller's loop (see
         /// RunConditionLoopAsync) because none of it can change between polls, and rebuilding a
-        /// compiled Regex / re-parsing a hex colour / re-converting the template bitmap on every
-        /// tick was pure waste on a path that runs 4-10x a second for as long as the watcher is
-        /// armed. Nulls are fine: a probe only ever reads the ones its own condition type needs.
+        /// compiled Regex / re-parsing a hex colour / re-converting the template bitmap /
+        /// re-reading four ROI fields on every tick was pure waste on a path that runs 4-10x a
+        /// second for as long as the watcher is armed. Nulls are fine: a probe only ever reads
+        /// the ones its own condition type needs. <paramref name="reportRegion"/> is true only
+        /// for the caller's seed probe — see the gate at the call site.
         /// </remarks>
         private bool ProbeCondition(
             ProfileTriggerConfig cfg,
@@ -789,7 +802,9 @@ namespace TrueReplayer.Services
             Models.WindowTarget? windowTarget,
             System.Text.RegularExpressions.Regex? titleRegex,
             System.Drawing.Color? pixelColor,
-            OpenCvSharp.Mat? templateMat)
+            OpenCvSharp.Mat? templateMat,
+            System.Drawing.Rectangle? searchRegion,
+            bool reportRegion)
         {
             try
             {
@@ -828,14 +843,10 @@ namespace TrueReplayer.Services
                     {
                         if (templateMat == null) return false;
                         double confidence = Math.Min(0.99, cfg.ImageConfidence <= 0 ? 0.8 : cfg.ImageConfidence);
-                        // Optional ROI — constrain the scan to a sub-rect (cheaper + fewer false
-                        // positives for a background poll). Absolute coords; no offset translation.
-                        System.Drawing.Rectangle? searchRegion = null;
-                        if (cfg.SearchRegionW is int sw && cfg.SearchRegionH is int sh && sw > 0 && sh > 0)
-                            searchRegion = new System.Drawing.Rectangle(cfg.SearchRegionX ?? 0, cfg.SearchRegionY ?? 0, sw, sh);
-                        // Pre-converted template (see the loop): the Bitmap overload would redo the
-                        // LockBits + BGRA→BGR conversion into a fresh native Mat on every poll.
-                        return ImageMatchingService.MatchOnce(templateMat, searchRegion, reportUnusableRegion: true)
+                        // Pre-converted template + pre-built ROI (see the loop): the Bitmap overload
+                        // would redo the LockBits + BGRA→BGR conversion into a fresh native Mat on
+                        // every poll.
+                        return ImageMatchingService.MatchOnce(templateMat, searchRegion, reportUnusableRegion: reportRegion)
                             .Score >= confidence;
                     }
                     default:

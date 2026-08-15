@@ -35,6 +35,24 @@ namespace TrueReplayer.Services
         }
 
         /// <summary>
+        /// Captures a rectangular region of the virtual screen as a Bitmap. Coordinates are
+        /// ABSOLUTE virtual-screen coords — exactly what CopyFromScreen's source origin takes.
+        /// No clamping here: callers validate the rect against the cached virtual-screen
+        /// bounds first (see ImageMatchingService.MatchOnce).
+        /// </summary>
+        public static Bitmap CaptureRegion(int absX, int absY, int w, int h)
+        {
+            // Managed Bitmap + CopyFromScreen for the same GDI-handle-leak reason as
+            // CaptureVirtualScreen above.
+            var bitmap = new Bitmap(w, h, PixelFormat.Format32bppArgb);
+            using (var g = Graphics.FromImage(bitmap))
+            {
+                g.CopyFromScreen(absX, absY, 0, 0, new System.Drawing.Size(w, h), CopyPixelOperation.SourceCopy);
+            }
+            return bitmap;
+        }
+
+        /// <summary>
         /// Converts a System.Drawing.Bitmap to an OpenCvSharp Mat (BGR format).
         /// </summary>
         public static Mat BitmapToMat(Bitmap bitmap)

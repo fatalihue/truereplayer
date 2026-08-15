@@ -222,6 +222,38 @@ namespace TrueReplayer.Services
             base.OnFormClosed(e);
         }
 
+        // Constant paint objects, hoisted out of the per-frame path (OnPaint / DrawMagnifier run
+        // on every mouse move). Static Font/SolidBrush/Pen are safe here because the form only
+        // ever paints on its own UI thread — GDI+ objects are only unsafe under CONCURRENT use.
+        // Per-frame geometry (GraphicsPath, Region) and the sampled-pixel swatch (colour changes
+        // per state) stay local with their own using.
+        private static readonly SolidBrush OverlayTintBrush = new(Color.FromArgb(100, 0, 0, 0));
+        private static readonly Pen SelectionPen = new(Color.FromArgb(255, 96, 205, 255), 2f); // #60CDFF accent
+        private static readonly Font DimLabelFont = new("Segoe UI", 11f, FontStyle.Regular);
+        private static readonly SolidBrush DimLabelBgBrush = new(Color.FromArgb(200, 0, 0, 0));
+        private static readonly Font HintFont = new("Segoe UI", 13f, FontStyle.Regular);
+        private static readonly SolidBrush HintBgBrush = new(Color.FromArgb(180, 0, 0, 0));
+        // One brush for BOTH drop shadows — disc and chip rings use the same colour.
+        private static readonly SolidBrush MagShadowBrush = new(Color.FromArgb(MagShadowAlpha, 0, 0, 0));
+        private static readonly SolidBrush MagBackdropBrush = new(Color.FromArgb(235, 18, 18, 18));
+        private static readonly Pen MagGridPen = new(Color.FromArgb(35, 255, 255, 255));
+        private static readonly SolidBrush MagCrossBrush = new(Color.FromArgb(64, 96, 205, 255));
+        private static readonly Pen MagCenterDarkPen = new(Color.FromArgb(170, 0, 0, 0), 3f);
+        private static readonly Pen MagCenterLightPen = new(Color.White, 1.5f);
+        private static readonly Pen MagBorderPrecisionPen = new(Color.FromArgb(220, 96, 205, 255), 2f);
+        private static readonly Pen MagBorderPen = new(Color.FromArgb(140, 255, 255, 255), 1.5f);
+        private static readonly Font SlowBadgeFont = new("Consolas", 8f, FontStyle.Bold);
+        private static readonly SolidBrush SlowBadgeBgBrush = new(Color.FromArgb(220, 0, 0, 0));
+        // Badge foreground AND the chip's coord/HEX text — same accent colour, one brush.
+        private static readonly SolidBrush AccentTextBrush = new(Color.FromArgb(255, 96, 205, 255));
+        // Monospace coords so the chip width stops jumping per-digit as the cursor moves.
+        private static readonly Font CoordFont = new("Consolas", 10f, FontStyle.Regular);
+        private static readonly Font HexFont = new("Consolas", 10.5f, FontStyle.Bold);
+        private static readonly Font RgbFont = new("Consolas", 9f, FontStyle.Regular);
+        private static readonly SolidBrush ChipBgBrush = new(Color.FromArgb(225, 0, 0, 0));
+        private static readonly SolidBrush RgbTextBrush = new(Color.FromArgb(210, 197, 197, 197));
+        private static readonly Pen SwatchBorderPen = new(Color.FromArgb(170, 255, 255, 255), 1f);
+
         protected override void OnPaint(PaintEventArgs e)
         {
             base.OnPaint(e);
@@ -243,8 +275,7 @@ namespace TrueReplayer.Services
                         new Rectangle(0, 0, _screenshot.Width, _screenshot.Height), GraphicsUnit.Pixel);
 
             // Dark overlay on entire screen
-            using var overlay = new SolidBrush(Color.FromArgb(100, 0, 0, 0));
-            g.FillRectangle(overlay, ClientRectangle);
+            g.FillRectangle(OverlayTintBrush, ClientRectangle);
 
             if (_isDragging || _hasSelection)
             {
@@ -255,13 +286,11 @@ namespace TrueReplayer.Services
                     g.DrawImage(_screenshot, rect, rect, GraphicsUnit.Pixel);
 
                     // Selection border
-                    using var pen = new Pen(Color.FromArgb(255, 96, 205, 255), 2f); // #60CDFF accent
-                    g.DrawRectangle(pen, rect);
+                    g.DrawRectangle(SelectionPen, rect);
 
                     // Dimension label
                     string label = $"{rect.Width} × {rect.Height}";
-                    using var font = new Font("Segoe UI", 11f, FontStyle.Regular);
-                    var labelSize = g.MeasureString(label, font);
+                    var labelSize = g.MeasureString(label, DimLabelFont);
                     float labelX = rect.X + (rect.Width - labelSize.Width) / 2;
                     float labelY = rect.Bottom + 6;
 
@@ -269,10 +298,8 @@ namespace TrueReplayer.Services
                     if (labelY + labelSize.Height > ClientRectangle.Height)
                         labelY = rect.Top - labelSize.Height - 6;
 
-                    using var bgBrush = new SolidBrush(Color.FromArgb(200, 0, 0, 0));
-                    g.FillRectangle(bgBrush, labelX - 4, labelY - 2, labelSize.Width + 8, labelSize.Height + 4);
-                    using var textBrush = new SolidBrush(Color.White);
-                    g.DrawString(label, font, textBrush, labelX, labelY);
+                    g.FillRectangle(DimLabelBgBrush, labelX - 4, labelY - 2, labelSize.Width + 8, labelSize.Height + 4);
+                    g.DrawString(label, DimLabelFont, Brushes.White, labelX, labelY);
                 }
             }
 
@@ -282,18 +309,15 @@ namespace TrueReplayer.Services
             if (!_isDragging)
             {
                 string hint = _hintText;
-                using var font = new Font("Segoe UI", 13f, FontStyle.Regular);
-                var size = g.MeasureString(hint, font);
+                var size = g.MeasureString(hint, HintFont);
                 // Centred on ONE monitor (see _hintBounds), not the virtual desktop. The
                 // vertical offset is measured from that monitor's top too, so a screen sitting
                 // lower or taller than its neighbour still gets the banner near ITS top edge.
                 float hx = _hintBounds.X + (_hintBounds.Width - size.Width) / 2;
                 float hy = _hintBounds.Y + 40;
 
-                using var bgBrush = new SolidBrush(Color.FromArgb(180, 0, 0, 0));
-                g.FillRoundedRectangle(bgBrush, hx - 12, hy - 6, size.Width + 24, size.Height + 12, 8);
-                using var textBrush = new SolidBrush(Color.White);
-                g.DrawString(hint, font, textBrush, hx, hy);
+                g.FillRoundedRectangle(HintBgBrush, hx - 12, hy - 6, size.Width + 24, size.Height + 12, 8);
+                g.DrawString(hint, HintFont, Brushes.White, hx, hy);
             }
 
             // Cursor callout — drawn last so it sits above the overlay tint and any
@@ -621,16 +645,14 @@ namespace TrueReplayer.Services
 
             // Soft drop shadow — lifts the disc off busy backgrounds so it reads as a
             // deliberate instrument rather than a screenshot artifact.
-            using (var sh = new SolidBrush(Color.FromArgb(MagShadowAlpha, 0, 0, 0)))
-                for (int s = MagShadowSpread; s >= 1; s--)
-                    g.FillEllipse(sh, circleRect.X - s, circleRect.Y - s + MagShadowDy,
-                                  circleRect.Width + 2 * s, circleRect.Height + 2 * s);
+            for (int s = MagShadowSpread; s >= 1; s--)
+                g.FillEllipse(MagShadowBrush, circleRect.X - s, circleRect.Y - s + MagShadowDy,
+                              circleRect.Width + 2 * s, circleRect.Height + 2 * s);
 
             // Dark backdrop so out-of-bounds source pixels (near screen edges) read
             // as "void" instead of garbage. Sub-pixel circle border softens the
             // clipped edge.
-            using (var bg = new SolidBrush(Color.FromArgb(235, 18, 18, 18)))
-                g.FillEllipse(bg, circleRect);
+            g.FillEllipse(MagBackdropBrush, circleRect);
 
             // Clip to the disc, then blit the screenshot patch with
             // NearestNeighbour for pixel-perfect zoom (no smoothing).
@@ -666,13 +688,12 @@ namespace TrueReplayer.Services
                 // Faint grid between amplified pixels — half-alpha white so it sits
                 // on top of any colour without dominating. Skipping the i=0 and
                 // i=MagPixelCount edges (they land on the disc border anyway).
-                using var gridPen = new Pen(Color.FromArgb(35, 255, 255, 255));
                 for (int i = 1; i < MagPixelCount; i++)
                 {
                     int gx = magX + i * MagPixelSize;
                     int gy = magY + i * MagPixelSize;
-                    g.DrawLine(gridPen, gx, magY, gx, magY + MagDiameter);
-                    g.DrawLine(gridPen, magX, gy, magX + MagDiameter, gy);
+                    g.DrawLine(MagGridPen, gx, magY, gx, magY + MagDiameter);
+                    g.DrawLine(MagGridPen, magX, gy, magX + MagDiameter, gy);
                 }
 
                 int halfPx = (MagPixelCount / 2) * MagPixelSize;
@@ -696,8 +717,7 @@ namespace TrueReplayer.Services
                 using (var crossArea = new Region(new Rectangle(magX + halfPx, magY, MagPixelSize, MagDiameter)))
                 {
                     crossArea.Union(new Rectangle(magX, magY + halfPx, MagDiameter, MagPixelSize));
-                    using var crossBrush = new SolidBrush(Color.FromArgb(64, 96, 205, 255));
-                    g.FillRegion(crossBrush, crossArea);
+                    g.FillRegion(MagCrossBrush, crossArea);
                 }
 
                 // Back to anti-aliased for the centre-cell outline (smooth vector).
@@ -709,10 +729,8 @@ namespace TrueReplayer.Services
                 // Dual stroke — a dark 3 px underlay then white 1.5 px on top — so the
                 // target cell stays legible on both light and dark pixels (a lone white
                 // outline used to vanish on white-ish colours).
-                using (var centerDark = new Pen(Color.FromArgb(170, 0, 0, 0), 3f))
-                    g.DrawRectangle(centerDark, magX + halfPx, magY + halfPx, MagPixelSize, MagPixelSize);
-                using (var centerLight = new Pen(Color.White, 1.5f))
-                    g.DrawRectangle(centerLight, magX + halfPx, magY + halfPx, MagPixelSize, MagPixelSize);
+                g.DrawRectangle(MagCenterDarkPen, magX + halfPx, magY + halfPx, MagPixelSize, MagPixelSize);
+                g.DrawRectangle(MagCenterLightPen, magX + halfPx, magY + halfPx, MagPixelSize, MagPixelSize);
 
                 g.ResetClip();
             }
@@ -720,10 +738,7 @@ namespace TrueReplayer.Services
             // Disc border — 1.5 px subtle white outside the clip so it doesn't
             // overlap with the centre highlight. Turns accent while precision mode is on,
             // so the damped cursor never leaves the user wondering why it feels stuck.
-            using (var borderPen = _precisionActive
-                ? new Pen(Color.FromArgb(220, 96, 205, 255), 2f)
-                : new Pen(Color.FromArgb(140, 255, 255, 255), 1.5f))
-                g.DrawEllipse(borderPen, circleRect);
+            g.DrawEllipse(_precisionActive ? MagBorderPrecisionPen : MagBorderPen, circleRect);
 
             // Live "SLOW" badge — state, not instruction: the discoverable hint lives in the
             // top bar, this only confirms the mode is engaged. Sits inside the lower edge of
@@ -731,17 +746,14 @@ namespace TrueReplayer.Services
             // narrow enough to fit the chord at that height even on the smallest zoom level.
             if (_precisionActive)
             {
-                using var slowFont = new Font("Consolas", 8f, FontStyle.Bold);
                 const string slowText = "SLOW";
-                var slowSize = g.MeasureString(slowText, slowFont);
+                var slowSize = g.MeasureString(slowText, SlowBadgeFont);
                 float badgeW = slowSize.Width + 10;
                 float badgeH = slowSize.Height + 2;
                 float badgeX = magX + (MagDiameter - badgeW) / 2;
                 float badgeY = magY + MagDiameter - badgeH - 8;
-                using (var badgeBg = new SolidBrush(Color.FromArgb(220, 0, 0, 0)))
-                    g.FillRoundedRectangle(badgeBg, badgeX, badgeY, badgeW, badgeH, 4);
-                using (var badgeFg = new SolidBrush(Color.FromArgb(255, 96, 205, 255)))
-                    g.DrawString(slowText, slowFont, badgeFg, badgeX + 5, badgeY + 1);
+                g.FillRoundedRectangle(SlowBadgeBgBrush, badgeX, badgeY, badgeW, badgeH, 4);
+                g.DrawString(slowText, SlowBadgeFont, AccentTextBrush, badgeX + 5, badgeY + 1);
             }
 
             // Coord chip below the disc — TWO lines:
@@ -765,13 +777,9 @@ namespace TrueReplayer.Services
                 ? $"RGB  {sampled.Value.R}, {sampled.Value.G}, {sampled.Value.B}"
                 : "";
 
-            // Monospace coords so the chip width stops jumping per-digit as the cursor moves.
-            using var coordFont = new Font("Consolas", 10f, FontStyle.Regular);
-            using var hexFont = new Font("Consolas", 10.5f, FontStyle.Bold);
-            using var rgbFont = new Font("Consolas", 9f, FontStyle.Regular);
-            var coordSize = g.MeasureString(coordText, coordFont);
-            var hexSize = showHex ? g.MeasureString(hexText, hexFont) : SizeF.Empty;
-            var rgbSize = (showHex && rgbText.Length > 0) ? g.MeasureString(rgbText, rgbFont) : SizeF.Empty;
+            var coordSize = g.MeasureString(coordText, CoordFont);
+            var hexSize = showHex ? g.MeasureString(hexText, HexFont) : SizeF.Empty;
+            var rgbSize = (showHex && rgbText.Length > 0) ? g.MeasureString(rgbText, RgbFont) : SizeF.Empty;
 
             // Colour swatch to the left of the HEX line — the signature "real eyedropper"
             // element (ShareX/PowerToys both show it). pointPick only, so gated on showHex.
@@ -787,38 +795,31 @@ namespace TrueReplayer.Services
             float chipY = magY + MagDiameter + MagLabelGap;
 
             // Match the disc — a soft shadow lifts the chip too (radius grows with the ring).
-            using (var chipShadow = new SolidBrush(Color.FromArgb(MagShadowAlpha, 0, 0, 0)))
-                for (int s = MagShadowSpread; s >= 1; s--)
-                    g.FillRoundedRectangle(chipShadow, chipX - s, chipY - s + MagShadowDy,
-                                           chipW + 2 * s, chipH + 2 * s, 5 + s);
+            for (int s = MagShadowSpread; s >= 1; s--)
+                g.FillRoundedRectangle(MagShadowBrush, chipX - s, chipY - s + MagShadowDy,
+                                       chipW + 2 * s, chipH + 2 * s, 5 + s);
 
-            using (var chipBg = new SolidBrush(Color.FromArgb(225, 0, 0, 0)))
-                g.FillRoundedRectangle(chipBg, chipX, chipY, chipW, chipH, 5);
-            using (var chipFg = new SolidBrush(Color.FromArgb(255, 96, 205, 255)))
-            using (var rgbFg = new SolidBrush(Color.FromArgb(210, 197, 197, 197)))
+            g.FillRoundedRectangle(ChipBgBrush, chipX, chipY, chipW, chipH, 5);
+            float coordX = chipX + (chipW - coordSize.Width) / 2;
+            g.DrawString(coordText, CoordFont, AccentTextBrush, coordX, chipY + 3);
+            if (showHex)
             {
-                float coordX = chipX + (chipW - coordSize.Width) / 2;
-                g.DrawString(coordText, coordFont, chipFg, coordX, chipY + 3);
-                if (showHex)
+                float hexY = chipY + 3 + coordSize.Height + 1;
+                float groupX = chipX + (chipW - hexGroupW) / 2;
+                float hexX = groupX;
+                if (showSwatch)
                 {
-                    float hexY = chipY + 3 + coordSize.Height + 1;
-                    float groupX = chipX + (chipW - hexGroupW) / 2;
-                    float hexX = groupX;
-                    if (showSwatch)
-                    {
-                        float swY = hexY + (hexSize.Height - swatch) / 2f;
-                        using (var swBrush = new SolidBrush(Color.FromArgb(255, sampled!.Value.R, sampled.Value.G, sampled.Value.B)))
-                            g.FillRectangle(swBrush, groupX, swY, swatch, swatch);
-                        using (var swBorder = new Pen(Color.FromArgb(170, 255, 255, 255), 1f))
-                            g.DrawRectangle(swBorder, groupX, swY, swatch, swatch);
-                        hexX = groupX + swatch + swGap;
-                    }
-                    g.DrawString(hexText, hexFont, chipFg, hexX, hexY);
-                    if (rgbText.Length > 0)
-                    {
-                        float rgbX = chipX + (chipW - rgbSize.Width) / 2;
-                        g.DrawString(rgbText, rgbFont, rgbFg, rgbX, hexY + hexSize.Height + 1);
-                    }
+                    float swY = hexY + (hexSize.Height - swatch) / 2f;
+                    using (var swBrush = new SolidBrush(Color.FromArgb(255, sampled!.Value.R, sampled.Value.G, sampled.Value.B)))
+                        g.FillRectangle(swBrush, groupX, swY, swatch, swatch);
+                    g.DrawRectangle(SwatchBorderPen, groupX, swY, swatch, swatch);
+                    hexX = groupX + swatch + swGap;
+                }
+                g.DrawString(hexText, HexFont, AccentTextBrush, hexX, hexY);
+                if (rgbText.Length > 0)
+                {
+                    float rgbX = chipX + (chipW - rgbSize.Width) / 2;
+                    g.DrawString(rgbText, RgbFont, RgbTextBrush, rgbX, hexY + hexSize.Height + 1);
                 }
             }
 

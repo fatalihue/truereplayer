@@ -86,6 +86,11 @@ namespace TrueReplayer.Services
         /// daemon's ImageFound watcher). That conversion is a LockBits plus a BGRA→BGR CvtColor into
         /// a freshly allocated native Mat, and the template cannot change while a loop is running.
         /// One-shot callers should use the Bitmap overload above instead.
+        ///
+        /// With a usable region only that sub-rectangle is captured from the screen; the old flow
+        /// grabbed the ENTIRE virtual desktop per call and cropped a sub-Mat out of it, so an
+        /// ROI-constrained poll still paid the full-screen capture on every tick. An unusable
+        /// region returns NOT FOUND before anything is captured at all.
         /// </summary>
         /// <param name="reportUnusableRegion">
         /// Log a line when the search region can't be applied. The polling caller sets this on
@@ -93,23 +98,25 @@ namespace TrueReplayer.Services
         /// </param>
         public static MatchResult MatchOnce(Mat templateMat, System.Drawing.Rectangle? searchRegion, bool reportUnusableRegion)
         {
-            using var screenBitmap = ScreenCaptureService.CaptureVirtualScreen();
-            using var screenMat = ScreenCaptureService.BitmapToMat(screenBitmap);
-
-            // The bitmap returned by CaptureVirtualScreen starts at (0,0) but corresponds to the
-            // virtual screen origin (vx, vy). Callers pass searchRegion in ABSOLUTE virtual-screen
-            // coords (that's what the overlay form reports), so we must subtract (vx, vy) before
-            // indexing into the bitmap — otherwise multi-monitor setups with vx ≠ 0 would crop
-            // the wrong slice (and the test-match score would tank to noise levels).
-            // Cached virtual-screen origin — saves 2 P/Invokes per match attempt
-            // (WaitImage polls at 500 ms, so a few seconds of waiting was hitting
-            // GetSystemMetrics dozens of times). See NativeMethods.VirtualScreen.
-            var (vx, vy, _, _) = NativeMethods.VirtualScreen.Bounds;
+            // Callers pass searchRegion in ABSOLUTE virtual-screen coords (that's what the overlay
+            // form reports), while captured bitmaps index from (0,0) at the virtual-screen origin
+            // (vx, vy) — so the region math below subtracts the origin before clamping, and the
+            // returned match coords add it back. Otherwise multi-monitor setups with vx ≠ 0 would
+            // crop the wrong slice (and the test-match score would tank to noise levels).
+            // Cached bounds — saves P/Invokes per match attempt (WaitImage polls at 500 ms, so a
+            // few seconds of waiting was hitting GetSystemMetrics dozens of times), and it is the
+            // SAME cache CaptureVirtualScreen reads, so origin and full-screen capture stay
+            // consistent by construction. See NativeMethods.VirtualScreen.
+            var (vx, vy, vw, vh) = NativeMethods.VirtualScreen.Bounds;
 
             int offsetX = 0;
             int offsetY = 0;
-            Mat workingMat = screenMat;
-            Mat? croppedMat = null;
+            // Capture is DEFERRED until the region has been validated: the region branch grabs
+            // only its sub-rectangle, the region-less branch grabs the whole virtual screen, and
+            // an unusable region returns before either. Whichever branch filled them, both are
+            // released in the finally.
+            Bitmap? screenBitmap = null;
+            Mat? screenMat = null;
             try
             {
                 if (searchRegion is { } region)
@@ -117,12 +124,13 @@ namespace TrueReplayer.Services
                     int rxBitmap = region.X - vx;
                     int ryBitmap = region.Y - vy;
                     // Region may extend off the screen on either side — clamp the start to the
-                    // bitmap bounds and shrink width/height by however much was clipped at the
-                    // left/top edge.
+                    // desktop bounds and shrink width/height by however much was clipped at the
+                    // left/top edge. Clamped against the CACHED size (vw, vh) — nothing has been
+                    // captured yet at this point.
                     int rx = Math.Max(0, rxBitmap);
                     int ry = Math.Max(0, ryBitmap);
-                    int rw = Math.Min(screenMat.Width - rx, region.Width - (rx - rxBitmap));
-                    int rh = Math.Min(screenMat.Height - ry, region.Height - (ry - ryBitmap));
+                    int rw = Math.Min(vw - rx, region.Width - (rx - rxBitmap));
+                    int rh = Math.Min(vh - ry, region.Height - (ry - ryBitmap));
 
                     // >=, not >: Cv2.MatchTemplate accepts a template exactly as large as the
                     // image it searches (the correlation map is then 1x1). An ROI drawn snugly
@@ -133,12 +141,16 @@ namespace TrueReplayer.Services
                     {
                         offsetX = rx;
                         offsetY = ry;
-                        croppedMat = new Mat(screenMat, new OpenCvSharp.Rect(rx, ry, rw, rh));
-                        workingMat = croppedMat;
+                        // Capture ONLY the validated sub-rectangle (back in absolute coords).
+                        // The crop happened at capture time, so no sub-Mat is needed — and an
+                        // ROI-constrained poll no longer pays for a full-desktop grab per tick.
+                        screenBitmap = ScreenCaptureService.CaptureRegion(rx + vx, ry + vy, rw, rh);
+                        screenMat = ScreenCaptureService.BitmapToMat(screenBitmap);
                     }
                     else
                     {
-                        // An unusable region is NOT-FOUND, never a full-screen search.
+                        // An unusable region is NOT-FOUND, never a full-screen search — and it is
+                        // decided BEFORE any capture, so an off-desktop region costs nothing per poll.
                         //
                         // This branch catches two different situations and the old fall-through
                         // handled both by widening the hunt to the entire virtual desktop, which
@@ -162,12 +174,17 @@ namespace TrueReplayer.Services
                             DiagnosticLog.Warn(
                                 $"[ImageMatch] Search region {region.Width}x{region.Height} at ({region.X},{region.Y}) " +
                                 $"is unusable for a {templateMat.Width}x{templateMat.Height} template " +
-                                $"(usable {rw}x{rh} after clipping to the {screenMat.Width}x{screenMat.Height} desktop at " +
+                                $"(usable {rw}x{rh} after clipping to the {vw}x{vh} desktop at " +
                                 $"({vx},{vy})) — reporting NOT FOUND. A negative size means the region is off-desktop, " +
                                 "e.g. recorded on a monitor that is no longer connected.");
                         }
                         return new MatchResult(0, 0, 0, templateMat.Width, templateMat.Height);
                     }
+                }
+                else
+                {
+                    screenBitmap = ScreenCaptureService.CaptureVirtualScreen();
+                    screenMat = ScreenCaptureService.BitmapToMat(screenBitmap);
                 }
 
                 // Cv2.MatchTemplate throws if the template is larger than the image being searched
@@ -177,11 +194,11 @@ namespace TrueReplayer.Services
                 // monitor is unplugged). Treat it as "not found" (Score 0) so the action runs its
                 // normal timeout / OnTimeout handling instead of throwing an unobserved exception
                 // that aborts the whole replay run.
-                if (workingMat.Width < templateMat.Width || workingMat.Height < templateMat.Height)
+                if (screenMat.Width < templateMat.Width || screenMat.Height < templateMat.Height)
                     return new MatchResult(0, 0, 0, templateMat.Width, templateMat.Height);
 
                 using var matchResult = new Mat();
-                Cv2.MatchTemplate(workingMat, templateMat, matchResult, TemplateMatchModes.CCoeffNormed);
+                Cv2.MatchTemplate(screenMat, templateMat, matchResult, TemplateMatchModes.CCoeffNormed);
                 Cv2.MinMaxLoc(matchResult, out _, out double maxVal, out _, out var maxLoc);
                 // Convert back: bitmap (maxLoc + offset) → absolute virtual-screen (add vx/vy)
                 // so the caller (click-on-match, test-match display) speaks the same coord system
@@ -195,7 +212,8 @@ namespace TrueReplayer.Services
             }
             finally
             {
-                croppedMat?.Dispose();
+                screenMat?.Dispose();
+                screenBitmap?.Dispose();
             }
         }
     }
