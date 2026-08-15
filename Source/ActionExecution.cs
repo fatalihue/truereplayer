@@ -1931,9 +1931,21 @@ namespace TrueReplayer.Services
 
             // Snapshot the actions list to avoid crashes from concurrent modifications
             var snapshot = _actions.ToList();
+            bool raisedTimerRes = false;
 
             try
             {
+                // Ask for a 1 ms system timer for the whole replay. Task.Delay quantises to
+                // the timer period (~15.6 ms by default), so without this every configured
+                // delay silently rounds up to the next ~15.6 ms multiple. Unlike the clicker
+                // there is no slow-run gate: its `nominalPeriod < 30` check protects an idle
+                // 1-click-per-second job, whereas a replay executes actions continuously and
+                // Game Mode's cursor interpolation sleeps 2/10 ms between steps regardless of
+                // the configured delays. Released in the finally — the setting is
+                // process-wide and sticky.
+                NativeMethods.TimeBeginPeriod(1);
+                raisedTimerRes = true;
+
                 // WhilePressed (forceInfiniteLoop) is semantically "run while the key is held"
                 // — waiting for the user to release the hotkey before starting would defeat
                 // the entire purpose. Skip the release wait in that mode.
@@ -2049,10 +2061,13 @@ namespace TrueReplayer.Services
                         lapCompletedRows = rowN;
                 }
 
-                // Run replay on a dedicated thread to avoid blocking the thread pool
+                // Task.Run, not Task.Factory.StartNew(..., LongRunning, ...): LongRunning
+                // spawns a dedicated non-pool thread that exits at the first await inside the
+                // loop, so every continuation ran on the pool anyway — the thread was created
+                // and thrown away. Same anti-pattern the clicker loop documents.
                 int skippedRows = 0;
                 string? firstSkipNote = null;
-                await Task.Factory.StartNew(async () =>
+                await Task.Run(async () =>
                 {
                     while (!token.IsCancellationRequested && (isInfinite || iteration < _loopCount))
                     {
@@ -2120,7 +2135,7 @@ namespace TrueReplayer.Services
                         if (!token.IsCancellationRequested && (isInfinite || iteration < _loopCount) && _loopInterval > 0)
                             await Task.Delay(_loopInterval, token);
                     }
-                }, token, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
+                }, token);
 
                 // One honest end-of-run summary instead of a toast per skipped row. Rides the
                 // error channel on purpose: rows DID fail; the log has the per-row reasons.
@@ -2143,6 +2158,9 @@ namespace TrueReplayer.Services
             catch (OperationCanceledException) { }
             finally
             {
+                // Always paired with TimeBeginPeriod — the resolution is process-wide.
+                if (raisedTimerRes) NativeMethods.TimeEndPeriod(1);
+
                 // Final push so the StatusBar lands on the actual completion count regardless
                 // of where the throttle happened to be. Skipped when no iterations ran (early
                 // cancel before the loop body) — pushing "Loop 0/N" would look broken.
@@ -2281,11 +2299,36 @@ namespace TrueReplayer.Services
             }
         }
 
+        // Actions whose execution time IS the feature — they wait for something (a screen
+        // state, a hotkey, a sub-profile, a browser round-trip) — as opposed to schedule
+        // debt the deadline scheduler in ExecuteActionsAsync should catch up on. After one
+        // of these the scheduler resyncs instead of compressing the next action's delay.
+        private static readonly HashSet<string> LongWaitActionTypes = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "WaitImage", "WaitPixelColor", "Pause", "RunProfile", "HoldKey",
+        };
+
+        // Browser actions all round-trip the extension pipe with a multi-second timeout, so
+        // the whole family qualifies — matched by prefix so a future Browser* action is
+        // covered without anyone remembering this list exists.
+        private static bool IsLongWaitAction(string? actionType) =>
+            actionType != null
+            && (LongWaitActionTypes.Contains(actionType)
+                || actionType.StartsWith("Browser", StringComparison.OrdinalIgnoreCase));
+
         private async Task ExecuteActionsAsync(List<ActionItem> actions, CancellationToken token)
         {
             // Pre-pass per call so nested RunProfile invocations each get a fresh map
             // scoped to the sub-profile's action list. Cost is negligible (~32 B / IF row).
             var (elseOf, endIfOf) = BuildBlockMap(actions);
+
+            // Schedule each action's delay against a monotonic deadline rather than chaining
+            // sleeps. Chaining makes the real cadence delay + action cost + syscall cost, so
+            // a macro drifted by the cost of its own actions — the clicker loop moved to the
+            // same scheme for the same reason. Wait-class actions are the deliberate
+            // exception; see the IsLongWaitAction resync after the switch.
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            long nextTickMs = 0;
 
             for (int i = 0; i < actions.Count; i++)
             {
@@ -2339,6 +2382,12 @@ namespace TrueReplayer.Services
                     bool branchTrue;
                     try { branchTrue = await EvaluateConditionWithTimeout(action, token); }
                     catch (OperationCanceledException) { break; }
+                    // A timed IF polls for up to ConditionTimeout ms — wall time that is the
+                    // feature, not schedule debt. Same wait-class resync as the one after the
+                    // action switch, for the same settle-delay reason. (If rows never reach
+                    // that switch — they `continue` out of the loop body right below.)
+                    if (action.ConditionTimeout > 0)
+                        nextTickMs = sw.ElapsedMilliseconds;
                     if (!branchTrue)
                     {
                         // FALSE — jump to ELSE if one exists, otherwise to ENDIF. The loop's
@@ -2379,7 +2428,18 @@ namespace TrueReplayer.Services
                     safeDelay = Math.Max(0, safeDelay);
                 }
 
-                await Task.Delay(safeDelay, token);
+                // The (jittered) delay advances a deadline instead of feeding Task.Delay
+                // directly, so the wait measures from the PREVIOUS action's deadline rather
+                // than from whenever its execution happened to finish — the action's own
+                // cost no longer stretches the cadence. Behind schedule (a slow action, a
+                // stall)? Resync instead of banking the debt — otherwise the loop would
+                // "catch up" with a no-delay salvo, same rationale as the clicker's scheduler.
+                nextTickMs += safeDelay;
+                long wait = nextTickMs - sw.ElapsedMilliseconds;
+                if (wait > 0)
+                    await Task.Delay((int)wait, token);
+                else
+                    nextTickMs = sw.ElapsedMilliseconds;
                 _currentActionRow = i + 1; // {row} token source (1-based grid row)
                 dispatcherQueue.TryEnqueue(() => OnActionExecuting?.Invoke(action));
                 InputHookManager.IsReplayingAction = true;
@@ -2643,6 +2703,14 @@ namespace TrueReplayer.Services
                     stepRec.DurationMs = stepWatch.ElapsedMilliseconds;
                     RecordRunStep(stepRec);
                 }
+
+                // Wait-class actions legitimately consume wall time — that time is the whole
+                // point of the action, not schedule debt. Resync the deadline after them so
+                // the NEXT action's delay runs in full: users configure that delay as a
+                // settle period after the wait, and deadline scheduling would otherwise
+                // compress it to zero.
+                if (IsLongWaitAction(action.ActionType))
+                    nextTickMs = sw.ElapsedMilliseconds;
             }
         }
 
@@ -5843,11 +5911,20 @@ namespace TrueReplayer.Services
                 return await InstantProbeAsync(action, token); // instant single check — unchanged legacy behaviour
 
             int pollMs = string.Equals(action.ConditionType, "PixelColorMatch", StringComparison.OrdinalIgnoreCase) ? 50 : 200;
+            // Hoist the per-tick invariants ONCE for the whole poll window — the reference
+            // image load + Bitmap→Mat conversion, the compiled window-title regex, the
+            // parsed pixel hex — exactly what the automation watcher hoists in
+            // TriggerService.RunConditionLoopAsync, and for the same reason: none of them
+            // can change mid-window, and redoing them every 50/200 ms tick was the bulk of
+            // the poll's cost. The instant path above stays context-free — a single check
+            // has nothing to amortise. `using` = the evaluation's finally: the context owns
+            // the template Mat and disposes it however the window ends.
+            using var ctx = BuildIfProbeContext(action);
             var sw = System.Diagnostics.Stopwatch.StartNew();
             while (true)
             {
                 token.ThrowIfCancellationRequested();
-                if (await InstantProbeAsync(action, token)) return true; // condition satisfied within the window
+                if (await InstantProbeAsync(action, ctx, token)) return true; // condition satisfied within the window
                 // Skip mode: a probe that faulted the row (e.g. missing rel-coords target
                 // window) must unwind NOW, not keep re-polling a dead probe for the full window.
                 if (_rowFaulted) return false;
@@ -5856,20 +5933,84 @@ namespace TrueReplayer.Services
             }
         }
 
+        // Per-evaluation cache for a timed IF's poll loop: the probe inputs that CANNOT
+        // change while the window runs. The search ROI is deliberately absent — the target
+        // window can move during the timeout, so TryResolveRelativeOffset stays per tick
+        // (see TryComposeIfSearchRegion). Owns the template Mat; Dispose ends the window.
+        private sealed class IfProbeContext : IDisposable
+        {
+            public OpenCvSharp.Mat? TemplateMat;          // ImageFound — null = reference image missing
+            public Models.WindowTarget? WindowTarget;     // WindowOpen — compiled regex cached alongside
+            public Regex? TitleRegex;
+            public System.Drawing.Color? PixelColor;      // PixelColorMatch — null = unparseable hex
+            // Only the FIRST tick may report an unusable search region: the region is fixed
+            // for the whole window, so the verdict can't change between ticks (same rule as
+            // WaitForImageAsync's reportRegion flag).
+            public bool ReportRegion = true;
+
+            public void Dispose()
+            {
+                TemplateMat?.Dispose();
+                TemplateMat = null;
+            }
+        }
+
+        private IfProbeContext BuildIfProbeContext(ActionItem action)
+        {
+            var ctx = new IfProbeContext();
+            if (string.Equals(action.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!string.IsNullOrEmpty(action.ImagePath))
+                {
+                    // Executing profile, not the UI's active one — same resolution rule as the
+                    // context-free ProbeImageFound path below.
+                    var refImage = ImageStorageService.LoadReferenceImage(CurrentExecutingProfileName, action.ImagePath);
+                    if (refImage != null)
+                    {
+                        // BitmapToMat copies the pixels, so the Bitmap can go immediately —
+                        // only the Mat has to live for the window (cf. TriggerService, which
+                        // keeps both for its own reasons).
+                        try { ctx.TemplateMat = ScreenCaptureService.BitmapToMat(refImage); }
+                        finally { refImage.Dispose(); }
+                    }
+                }
+            }
+            else if (string.Equals(action.ConditionType, "WindowOpen", StringComparison.OrdinalIgnoreCase))
+            {
+                // CompileTitleRegex emits IL (RegexOptions.Compiled) — its own doc asks
+                // callers to cache the result when the target is reused across many calls.
+                (ctx.WindowTarget, ctx.TitleRegex) = BuildWindowTargetFromAction(action);
+            }
+            else if (string.Equals(action.ConditionType, "PixelColorMatch", StringComparison.OrdinalIgnoreCase))
+            {
+                ctx.PixelColor = PixelColorService.ParseHex(action.PixelColor);
+            }
+            // Every other condition family either has nothing hoistable (Random, TimeWindow,
+            // ProcessRunning) or probes through the async paths that never see the context
+            // (clipboard, variable, file, browser) — the empty context is simply ignored.
+            return ctx;
+        }
+
         // Async-probing conditions fetch their data here before evaluating — the clipboard
         // read must run on the UI dispatcher and the browser probe awaits the extension
         // pipe; neither can block the sync InstantProbe (the replay thread awaiting a
         // dispatcher/pipe hop synchronously would risk a deadlock). Everything else falls
         // straight through to the sync InstantProbe unchanged. Keeps the same Negate /
         // IfOnProbeError / cancellation contract as InstantProbe.
-        private async Task<bool> InstantProbeAsync(ActionItem action, CancellationToken token)
+        //
+        // Context-free overload — the single instant check (ConditionTimeout <= 0). Behaviour
+        // and cost identical to before the timed path grew its per-window IfProbeContext.
+        private Task<bool> InstantProbeAsync(ActionItem action, CancellationToken token)
+            => InstantProbeAsync(action, null, token);
+
+        private async Task<bool> InstantProbeAsync(ActionItem action, IfProbeContext? ctx, CancellationToken token)
         {
             bool isClipboard = string.Equals(action.ConditionType, "ClipboardMatch", StringComparison.OrdinalIgnoreCase);
             bool isBrowserElement = string.Equals(action.ConditionType, "BrowserElementState", StringComparison.OrdinalIgnoreCase);
             bool isVariable = string.Equals(action.ConditionType, "Variable", StringComparison.OrdinalIgnoreCase);
             bool isFileExists = string.Equals(action.ConditionType, "FileExists", StringComparison.OrdinalIgnoreCase);
             if (!isClipboard && !isBrowserElement && !isVariable && !isFileExists)
-                return InstantProbe(action, token);
+                return InstantProbe(action, ctx, token);
 
             token.ThrowIfCancellationRequested();
             try
@@ -5945,9 +6086,13 @@ namespace TrueReplayer.Services
         // WindowMatcher — identical semantics to the profile Window Target (empty field =
         // wildcard; no criteria at all = no match). ForegroundOnly checks only the window
         // currently in front instead of enumerating all top-level windows.
-        private static bool ProbeWindowOpen(ActionItem action)
+        private static bool ProbeWindowOpen(ActionItem action, IfProbeContext? ctx)
         {
-            var (target, regex) = BuildWindowTargetFromAction(action);
+            // Timed-IF path reuses the target + compiled title regex hoisted into the
+            // context; a context-free (instant) probe builds them fresh, as it always did.
+            var (target, regex) = ctx?.WindowTarget != null
+                ? (ctx.WindowTarget, ctx.TitleRegex)
+                : BuildWindowTargetFromAction(action);
             if (action.WindowMatchForegroundOnly)
                 return TrueReplayer.Helpers.WindowMatcher.Matches(NativeMethods.GetForegroundWindow(), target, regex);
             return TrueReplayer.Helpers.WindowMatcher.FindWindow(target, regex) != IntPtr.Zero;
@@ -6073,7 +6218,11 @@ namespace TrueReplayer.Services
         // Returns the EFFECTIVE branch outcome — i.e. ConditionNegate is already applied.
         // The caller treats the return value as "execute TRUE branch?" without needing
         // to know about negation.
-        private bool InstantProbe(ActionItem action, CancellationToken token)
+        // ctx non-null only inside a timed IF's poll window (EvaluateConditionWithTimeout),
+        // carrying the hoisted template Mat / title regex / pixel color for that window; the
+        // instant single check arrives with null and the probes resolve everything fresh,
+        // exactly as they always did.
+        private bool InstantProbe(ActionItem action, IfProbeContext? ctx, CancellationToken token)
         {
             token.ThrowIfCancellationRequested();
 
@@ -6082,15 +6231,15 @@ namespace TrueReplayer.Services
                 bool rawResult;
                 if (string.Equals(action.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase))
                 {
-                    rawResult = ProbeImageFound(action);
+                    rawResult = ProbeImageFound(action, ctx);
                 }
                 else if (string.Equals(action.ConditionType, "PixelColorMatch", StringComparison.OrdinalIgnoreCase))
                 {
-                    rawResult = ProbePixelColorMatch(action);
+                    rawResult = ProbePixelColorMatch(action, ctx);
                 }
                 else if (string.Equals(action.ConditionType, "WindowOpen", StringComparison.OrdinalIgnoreCase))
                 {
-                    rawResult = ProbeWindowOpen(action);
+                    rawResult = ProbeWindowOpen(action, ctx);
                 }
                 else if (string.Equals(action.ConditionType, "Random", StringComparison.OrdinalIgnoreCase))
                 {
@@ -6135,9 +6284,52 @@ namespace TrueReplayer.Services
             }
         }
 
-        private bool ProbeImageFound(ActionItem action)
+        // Composes the optional search ROI the same way ExecuteWaitImage does — translated
+        // through the CURRENT relative-coord offset so a profile-bound region tracks its
+        // target window even when the user has moved the window. Deliberately re-run on
+        // every poll tick of a timed IF (never hoisted into IfProbeContext): the window can
+        // move during the timeout, and a frozen ROI would keep searching where it used to be.
+        // Returns false for the config-impossible state (rel-coords on, target window
+        // missing): with IfOnProbeError=Halt this surfaces the error + cancels (same as
+        // WaitImage); otherwise the probe silently reads not-matched. Not an exception, so
+        // InstantProbe's catch never fires for this path.
+        private bool TryComposeIfSearchRegion(ActionItem action, out System.Drawing.Rectangle? searchRegion)
+        {
+            searchRegion = null;
+            if (action.WaitImageSearchW is int sw && action.WaitImageSearchH is int sh && sw > 0 && sh > 0)
+            {
+                int sx = action.WaitImageSearchX ?? 0;
+                int sy = action.WaitImageSearchY ?? 0;
+                if (!TryResolveRelativeOffset(out int dx, out int dy))
+                {
+                    if (string.Equals(action.IfOnProbeError, "Halt", StringComparison.OrdinalIgnoreCase))
+                        ReportMissingTargetWindow();
+                    return false;
+                }
+                searchRegion = new System.Drawing.Rectangle(sx + dx, sy + dy, sw, sh);
+            }
+            return true;
+        }
+
+        private bool ProbeImageFound(ActionItem action, IfProbeContext? ctx)
         {
             if (string.IsNullOrEmpty(action.ImagePath)) return false;
+
+            // Same 1.0-is-unreachable clamp as ExecuteWaitImage — a 100%-confidence IF/ImageFound
+            // condition would otherwise always read FALSE on a live screen.
+            double confidence = action.Confidence > 0 ? Math.Min(action.Confidence, 0.99) : 0.8;
+
+            // Timed-IF path: the template was decoded + converted ONCE by BuildIfProbeContext.
+            // A null Mat means the reference image is missing on disk — same raw not-found
+            // the context-free path returns below.
+            if (ctx != null)
+            {
+                if (ctx.TemplateMat == null) return false;
+                if (!TryComposeIfSearchRegion(action, out var region)) return false;
+                bool report = ctx.ReportRegion;   // unusable-region warning: first tick only
+                ctx.ReportRegion = false;
+                return ImageMatchingService.MatchOnce(ctx.TemplateMat, region, report).Score >= confidence;
+            }
 
             // Executing profile, not the UI's active one — see CurrentExecutingProfileName. With
             // _getProfileName an If/ImageFound inside a RunProfile'd sub-profile always read
@@ -6148,30 +6340,7 @@ namespace TrueReplayer.Services
 
             try
             {
-                // Compose optional ROI the same way ExecuteWaitImage does — translate via
-                // the current relative-coord offset so a profile-bound region tracks its
-                // target window even when the user has moved the window.
-                System.Drawing.Rectangle? searchRegion = null;
-                if (action.WaitImageSearchW is int sw && action.WaitImageSearchH is int sh && sw > 0 && sh > 0)
-                {
-                    int sx = action.WaitImageSearchX ?? 0;
-                    int sy = action.WaitImageSearchY ?? 0;
-                    if (!TryResolveRelativeOffset(out int dx, out int dy))
-                    {
-                        // Rel-coords on but target window missing. With IfOnProbeError=Halt this
-                        // surfaces the error + cancels (same as WaitImage); otherwise we silently
-                        // treat as not-matched. Caller's catch above doesn't fire for this path
-                        // because it's not an exception — just a config-impossible state.
-                        if (string.Equals(action.IfOnProbeError, "Halt", StringComparison.OrdinalIgnoreCase))
-                            ReportMissingTargetWindow();
-                        return false;
-                    }
-                    searchRegion = new System.Drawing.Rectangle(sx + dx, sy + dy, sw, sh);
-                }
-
-                // Same 1.0-is-unreachable clamp as ExecuteWaitImage — a 100%-confidence IF/ImageFound
-                // condition would otherwise always read FALSE on a live screen.
-                double confidence = action.Confidence > 0 ? Math.Min(action.Confidence, 0.99) : 0.8;
+                if (!TryComposeIfSearchRegion(action, out var searchRegion)) return false;
                 var matchResult = ImageMatchingService.MatchOnce(referenceImage, searchRegion);
                 return matchResult.Score >= confidence;
             }
@@ -6181,10 +6350,12 @@ namespace TrueReplayer.Services
             }
         }
 
-        private bool ProbePixelColorMatch(ActionItem action)
+        private bool ProbePixelColorMatch(ActionItem action, IfProbeContext? ctx)
         {
             if (action.PixelX is not int relPx || action.PixelY is not int relPy) return false;
-            var target = PixelColorService.ParseHex(action.PixelColor);
+            // Timed-IF path reads the hex parsed once into the context (null there = the same
+            // unparseable-color false the fresh parse yields).
+            var target = ctx != null ? ctx.PixelColor : PixelColorService.ParseHex(action.PixelColor);
             if (target == null) return false;
 
             if (!TryResolveRelativeOffset(out int dx, out int dy))
