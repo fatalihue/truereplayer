@@ -4278,16 +4278,19 @@ namespace TrueReplayer.Services
             Raw,        // `join` — eats the next segment whatever it says, even a modifier name
             Count1,     // line/word — a 1-based index
             Count0,     // first/last — a length
-            Range,      // range — "a-b"
+            Span,       // range/words — "a-b", either side optional ("6-", "-5")
             Indices,    // lines — "3,1,2"
         }
 
         private static ModifierArg ArgOf(string modifier) => modifier switch
         {
-            "join" => ModifierArg.Raw,
+            // Freeform-text arguments — a separator (join) or a cut point (the split family).
+            // Consumed unconditionally, so an argument that happens to spell a modifier name
+            // is still an argument.
+            "join" or "before" or "after" or "beforelast" or "afterlast" => ModifierArg.Raw,
             "line" or "word" => ModifierArg.Count1,
             "first" or "last" => ModifierArg.Count0,
-            "range" => ModifierArg.Range,
+            "range" or "words" => ModifierArg.Span,
             "lines" => ModifierArg.Indices,
             _ => ModifierArg.None,
         };
@@ -4326,7 +4329,7 @@ namespace TrueReplayer.Services
             {
                 ModifierArg.Count1 => int.TryParse(arg, out var one) && one >= 1,
                 ModifierArg.Count0 => int.TryParse(arg, out var zero) && zero >= 0,
-                ModifierArg.Range => TryParseLineRange(arg, out _, out _),
+                ModifierArg.Span => TryParseSpan(arg, out _, out _),
                 ModifierArg.Indices => arg.AsSpan().IndexOfAnyInRange('0', '9') >= 0,
                 _ => false,
             };
@@ -4400,6 +4403,47 @@ namespace TrueReplayer.Services
                         result = result.Trim();
                         i++;
                         break;
+
+                    // ── Split modifiers — cut at a delimiter, keep one side ─────────────────
+                    // before:X / after:X cut at the FIRST occurrence, beforelast/afterlast at
+                    // the LAST. The delimiter itself is dropped either way. Placed here, ahead
+                    // of the line ops, because they narrow the RAW text before it is reshaped.
+                    case "before":
+                    case "after":
+                    case "beforelast":
+                    case "afterlast":
+                        {
+                            // The delimiter is freeform text, so it is consumed UNCONDITIONALLY
+                            // — the join rule, for the join reason: a delimiter that happens to
+                            // spell a modifier name is still a delimiter.
+                            string delim = i + 1 < parts.Length ? parts[i + 1] : string.Empty;
+                            if (delim.Length > 0)
+                            {
+                                bool fromEnd = mod is "beforelast" or "afterlast";
+                                // Case-insensitive, like every other match in the app (the same
+                                // convention sort/dedupe cite). It also means the editor's
+                                // cosmetic case-folding of a chain can never change the cut.
+                                int at = fromEnd
+                                    ? result.LastIndexOf(delim, StringComparison.OrdinalIgnoreCase)
+                                    : result.IndexOf(delim, StringComparison.OrdinalIgnoreCase);
+                                if (at < 0)
+                                    // Delimiter ABSENT → empty, never the whole content. Same
+                                    // fail-closed rule as line:99 and word:99: ask for a piece
+                                    // that is not there, get nothing. The other answer pastes an
+                                    // entire clipboard where the author meant a fragment.
+                                    result = string.Empty;
+                                else if (mod is "before" or "beforelast")
+                                    result = result[..at];
+                                else
+                                    result = result[(at + delim.Length)..];
+                            }
+                            // An empty delimiter is not a cut point — leave the content untouched.
+                            // That is "you didn't ask for anything", not "what you asked for is
+                            // missing", so it degrades to inert rather than to empty.
+                        }
+                        // Steps 2, landing safely past-the-end when there was no arg at all.
+                        i = StepModifier(parts, i, out _);
+                        break;
                     // The four int-argument modifiers share one shape: read the arg (literal or
                     // "@name"), and when a REFERENCE fails to resolve, yield EMPTY rather than
                     // leaving the modifier unapplied. Falling through would hand the caller the
@@ -4431,10 +4475,33 @@ namespace TrueReplayer.Services
                             {
                                 if (TryReadIntArg(parts[i + 1], ctx, 1, out var wordN, out _))
                                 {
-                                    var words = result.Split(new[] { ' ', '\t', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+                                    var words = result.Split(WordSeparators, StringSplitOptions.RemoveEmptyEntries);
                                     result = wordN <= words.Length ? words[wordN - 1] : string.Empty;
                                 }
                                 else result = string.Empty;
+                            }
+                            i = next;
+                        }
+                        break;
+                    case "words":
+                        // words:a-b → the SPAN of words a..b, as a substring of the original so
+                        // the spacing between them survives (see SliceWords). Open ends allowed:
+                        // "words:6-" is word 6 onwards. A reference is resolved to text and fed to
+                        // the SAME parser, so a variable holding "2-4" works — included for the
+                        // reason range has it: without it a hand-typed "words:@r" would fall
+                        // through the unknown-modifier default and paste everything.
+                        {
+                            int next = StepModifier(parts, i, out var wordsRef);
+                            if (next == i + 2)
+                            {
+                                var seg = parts[i + 1];
+                                string argText = seg;
+                                bool resolved = !wordsRef || TryResolveRefArg(seg, ctx, out argText);
+                                result = resolved && TryParseSpan(argText, out var wordFrom, out var wordTo)
+                                    ? SliceWords(result, wordFrom, wordTo)
+                                    // Only reachable for a reference: a literal only gets consumed
+                                    // when it already parsed as a span.
+                                    : string.Empty;
                             }
                             i = next;
                         }
@@ -4470,6 +4537,7 @@ namespace TrueReplayer.Services
                     case "range":
                         // range:a-b → keep lines a..b (1-based, inclusive; bounds swap when
                         // reversed; clamped to the available lines; no overlap → empty).
+                        // Either end may be open: "range:6-" is line 6 onwards.
                         // A reference here is resolved to text and fed to the SAME "a-b" parser, so
                         // a variable holding "2-4" works. Reference included even though the UI
                         // keeps this control literal-only: without it a hand-typed "range:@r" would
@@ -4481,7 +4549,7 @@ namespace TrueReplayer.Services
                                 var seg = parts[i + 1];
                                 string argText = seg;
                                 bool resolved = !rangeRef || TryResolveRefArg(seg, ctx, out argText);
-                                if (resolved && TryParseLineRange(argText, out var rangeFrom, out var rangeTo))
+                                if (resolved && TryParseSpan(argText, out var rangeFrom, out var rangeTo))
                                 {
                                     var lines = SplitContentLines(result);
                                     int from = Math.Max(1, rangeFrom);
@@ -4586,16 +4654,61 @@ namespace TrueReplayer.Services
         private static string[] SplitContentLines(string content)
             => content.Replace("\r\n", "\n").Split('\n');
 
-        // Parses the "a-b" argument of range:a-b (both 1-based ints; reversed bounds
-        // swap, mirroring {random:a-b}'s forgiveness).
-        private static bool TryParseLineRange(string s, out int from, out int to)
+        // Parses the "a-b" argument of range:a-b and words:a-b (both 1-based ints; reversed
+        // bounds swap, mirroring {random:a-b}'s forgiveness).
+        //
+        // Either side may be OMITTED for an open end: "6-" is "from 6 to the end", "-5" is
+        // "from the start to 5". A bare "-" carries no bound at all and is not a span — it has
+        // to stay rejected, or it would consume the following segment as an argument and shift
+        // the meaning of every modifier after it.
+        private static bool TryParseSpan(string s, out int from, out int to)
         {
             from = 0; to = 0;
+            if (string.IsNullOrEmpty(s)) return false;
             int dash = s.IndexOf('-');
-            if (dash <= 0 || dash >= s.Length - 1) return false;
-            if (!int.TryParse(s[..dash], out from) || !int.TryParse(s[(dash + 1)..], out to)) return false;
+            if (dash < 0) return false;
+            var left = s[..dash];
+            var right = s[(dash + 1)..];
+            if (left.Length == 0 && right.Length == 0) return false;
+            if (left.Length == 0) from = 1;
+            else if (!int.TryParse(left, out from)) return false;
+            // int.MaxValue is safe as "no upper bound": every consumer clamps it with Math.Min
+            // against the real item count before indexing.
+            if (right.Length == 0) to = int.MaxValue;
+            else if (!int.TryParse(right, out to)) return false;
             if (from > to) (from, to) = (to, from);
             return true;
+        }
+
+        // ONE definition of "what separates two words", used by word:N (which splits) and by
+        // words:a-b (which scans for offsets). Two hand-written copies of this set would be a
+        // rule that drifts — the same reason StepModifier is the single arity rule.
+        private static readonly char[] WordSeparators = { ' ', '\t', '\n', '\r' };
+        private static bool IsWordSeparator(char c) => Array.IndexOf(WordSeparators, c) >= 0;
+
+        // The span of WORDS from..to, returned as a SUBSTRING of the original. Splitting into
+        // words and re-joining with a single space would silently reformat the user's text —
+        // runs of spaces, tabs and line breaks BETWEEN the kept words come back verbatim this
+        // way. Offsets come from the original string, so the result can never split a surrogate
+        // pair either (word boundaries are whitespace).
+        private static string SliceWords(string content, int from, int to)
+        {
+            if (string.IsNullOrEmpty(content) || to < 1) return string.Empty;
+            if (from < 1) from = 1;
+            int start = -1, end = -1, index = 0, i = 0;
+            while (i < content.Length)
+            {
+                while (i < content.Length && IsWordSeparator(content[i])) i++;
+                if (i >= content.Length) break;
+                int wordStart = i;
+                while (i < content.Length && !IsWordSeparator(content[i])) i++;
+                index++;
+                if (index == from) start = wordStart;
+                if (index <= to) end = i;          // past the last word, `end` keeps the final one
+                if (index >= to) break;
+            }
+            // `from` past the last word leaves start < 0 — empty, the same answer word:99 gives.
+            return start < 0 || end <= start ? string.Empty : content[start..end];
         }
 
         // Run-state carrier threaded into token resolution: the variable store plus the current

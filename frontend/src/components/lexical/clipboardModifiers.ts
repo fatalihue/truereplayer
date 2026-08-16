@@ -3,15 +3,18 @@
 // popovers (clipboard + data-row cell — both run the SAME backend modifier pipeline).
 //
 // Modifier order in the emitted chain MUST match the backend pipeline:
-// next → trim → range/lines → sort → dedupe → reverse → join → line/word →
-// first/last → upper/lower/sentence/title. ('next' picks WHICH text the rest sees and is
-// handled in ResolveClipboardTokensAsync, ahead of ApplyClipboardModifiers; list ops then
-// narrow/reshape the multiline content, line/word extracts a single piece, limit and case finish.)
+// next → trim → before/after → range/lines → sort → dedupe → reverse → join → words →
+// line/word → first/last → upper/lower/sentence/title. ('next' picks WHICH text the rest sees
+// and is handled in ResolveClipboardTokensAsync, ahead of ApplyClipboardModifiers; the split
+// cuts the RAW text at a delimiter, list ops then narrow/reshape the multiline content, words
+// takes a span and line/word a single piece, limit and case finish.)
 
 export type CaseTransform = 'none' | 'upper' | 'lower' | 'sentence' | 'title';
-export type Extract = 'none' | 'line' | 'word';
+export type Extract = 'none' | 'line' | 'word' | 'words';
 export type Limit = 'none' | 'first' | 'last';
 export type ListPick = 'none' | 'range' | 'lines';
+/** Which side of the delimiter to keep. `splitLast` picks the last occurrence instead of the first. */
+export type Split = 'none' | 'before' | 'after';
 
 /**
  * Mirror of the backend's ActionReplayer.IsArgRef. A chain segment shaped "@name" is a REFERENCE
@@ -53,22 +56,58 @@ function tryParseInt(s: string | undefined): number | null {
   return Number.isSafeInteger(n) && n >= -2147483648 && n <= 2147483647 ? n : null;
 }
 
-/** Mirror of the backend TryParseLineRange — splits on the FIRST '-', both sides int.TryParse. */
-function isLineRange(s: string | undefined): boolean {
-  if (s === undefined) return false;
+/**
+ * ARITY mirror of the backend TryParseSpan — splits on the FIRST '-', each PRESENT side
+ * int.TryParse. Either side may be omitted for an open end ("6-", "-5"); a bare "-" carries no
+ * bound and is not a span, so it must stay rejected here too or the two sides would disagree
+ * about whether the following segment is an argument.
+ *
+ * This answers "does the backend CONSUME this segment?", which is a different question from
+ * "can these controls SHOW it?" — see parseSpanState.
+ */
+function isSpan(s: string | undefined): boolean {
+  if (s === undefined || s.length === 0) return false;
   const dash = s.indexOf('-');
-  if (dash <= 0 || dash >= s.length - 1) return false;
-  return tryParseInt(s.slice(0, dash)) !== null && tryParseInt(s.slice(dash + 1)) !== null;
+  if (dash < 0) return false;
+  const left = s.slice(0, dash);
+  const right = s.slice(dash + 1);
+  if (left.length === 0 && right.length === 0) return false;
+  if (left.length > 0 && tryParseInt(left) === null) return false;
+  if (right.length > 0 && tryParseInt(right) === null) return false;
+  return true;
 }
 
-type ArgKind = 'none' | 'raw' | 'count1' | 'count0' | 'range' | 'indices';
+/**
+ * REPRESENTABILITY of a span: only bare non-negative digits round-trip through two number
+ * fields. " 3 ", "+3" and "--5" are all consumed by the backend but would come back rewritten,
+ * so they are refused here and the chain goes read-only — the same posture line/word take.
+ * null on either side = open end.
+ */
+function parseSpanState(s: string | undefined): { from: number | null; to: number | null } | null {
+  if (s === undefined) return null;
+  const m = /^(\d*)-(\d*)$/.exec(s);
+  if (!m || (m[1].length === 0 && m[2].length === 0)) return null;
+  let from = m[1].length > 0 ? Number(m[1]) : null;
+  let to = m[2].length > 0 ? Number(m[2]) : null;
+  // The backend swaps reversed bounds, so a closed span round-trips in MEANING either way;
+  // swapping here keeps the rebuilt token byte-identical to what the controls will emit.
+  if (from !== null && to !== null && from > to) [from, to] = [to, from];
+  return { from, to };
+}
+
+/** Serializes a span back to "a-b", with an omitted side for an open end. null = emit nothing. */
+const spanText = (from: number | null, to: number | null): string | null =>
+  from === null && to === null ? null : `${from ?? ''}-${to ?? ''}`;
+
+type ArgKind = 'none' | 'raw' | 'count1' | 'count0' | 'span' | 'indices';
 
 const argOf = (modifier: string): ArgKind => {
   switch (modifier) {
-    case 'join': return 'raw';
+    // Freeform-text arguments — a separator (join) or a cut point (the split family).
+    case 'join': case 'before': case 'after': case 'beforelast': case 'afterlast': return 'raw';
     case 'line': case 'word': return 'count1';
     case 'first': case 'last': return 'count0';
-    case 'range': return 'range';
+    case 'range': case 'words': return 'span';
     case 'lines': return 'indices';
     default: return 'none';
   }
@@ -96,11 +135,34 @@ function stepModifier(parts: string[], i: number): { next: number; argIsRef: boo
   switch (kind) {
     case 'count1': { const n = tryParseInt(arg); literalFits = n !== null && n >= 1; break; }
     case 'count0': { const n = tryParseInt(arg); literalFits = n !== null && n >= 0; break; }
-    case 'range': literalFits = isLineRange(arg); break;
+    case 'span': literalFits = isSpan(arg); break;
     case 'indices': literalFits = /[0-9]/.test(arg); break;
     default: literalFits = false;
   }
   return { next: literalFits ? i + 2 : i + 1, argIsRef: false };
+}
+
+/**
+ * Indices into `parts` that hold the ARGUMENT of a freeform-text modifier — a join separator or
+ * a split delimiter. Whoever normalises a chain must leave these alone: case-folding them
+ * rewrites text the user typed ({clipboard:after:AB} is not {clipboard:after:ab} on screen, even
+ * though the engine matches either).
+ *
+ * Derived from the arity walk, not from "the previous segment spells join". That guess breaks
+ * where a raw modifier's own argument spells its name: in `{clipboard:join:join:X}` the walk
+ * consumes the second `join` AS the separator and then lands on `X` as a MODIFIER, while the
+ * positional test sees "join immediately before it" and shields a segment that is not an
+ * argument at all. Cosmetic there, but the rule has to come from the walk to stay right as
+ * modifiers are added.
+ */
+export function verbatimArgIndices(parts: string[], from: number): Set<number> {
+  const out = new Set<number>();
+  for (let i = from; i < parts.length;) {
+    const { next } = stepModifier(parts, i);
+    if (next === i + 2 && argOf(parts[i].toLowerCase()) === 'raw') out.add(i + 1);
+    i = next;
+  }
+  return out;
 }
 
 export interface TransformState {
@@ -111,8 +173,19 @@ export interface TransformState {
   next: boolean;
   trim: boolean;
   case: CaseTransform;
+  // Split at a delimiter — cuts the RAW text before the list ops reshape it. `splitDelim` is
+  // freeform text consumed verbatim (the join rule); an EMPTY delimiter is never emitted, since
+  // the backend leaves the content untouched for one and the controls would be lying.
+  split: Split;
+  splitDelim: string;
+  splitLast: boolean;      // cut at the LAST occurrence (beforelast/afterlast)
   extract: Extract;
   extractN: number;
+  // extract === 'words' — the span of words a..b. null on either side = open end
+  // ({clipboard:words:6-} is "word 6 onwards"). Kept separate from extractN because a span is
+  // two bounds, and separate from rangeFrom/rangeTo because those count LINES.
+  wordsFrom: number | null;
+  wordsTo: number | null;
   limit: Limit;
   limitN: number;
   // Reference arguments — "@name" instead of a literal index (e.g. {clipboard:line:@i}, where
@@ -134,8 +207,8 @@ export interface TransformState {
   unmodeledRefArg: boolean;
   // List ops — operate on the content as CRLF-normalized lines (backend list modifiers).
   listPick: ListPick;   // 'range' → range:a-b · 'lines' → lines:i,j,k (1-based)
-  rangeFrom: number;
-  rangeTo: number;
+  rangeFrom: number | null;   // null = open end, same as the word span above
+  rangeTo: number | null;
   linesSpec: string;    // raw comma list, e.g. "3,1,2" (duplicates = repeat the line)
   sort: boolean;        // case-insensitive A→Z
   dedupe: boolean;      // keep first occurrence, case-insensitive
@@ -148,8 +221,13 @@ export const DEFAULT_TRANSFORM: TransformState = {
   next: false,
   trim: false,
   case: 'none',
+  split: 'none',
+  splitDelim: '',
+  splitLast: false,
   extract: 'none',
   extractN: 1,
+  wordsFrom: 1,
+  wordsTo: null,
   limit: 'none',
   limitN: 10,
   extractRef: '',
@@ -193,8 +271,18 @@ export function buildRowNextToken(column: string, s: TransformState): string {
 function buildModifierParts(s: TransformState): string[] {
   const parts: string[] = [];
   if (s.trim) parts.push('trim');
-  if (s.listPick === 'range') parts.push('range', `${s.rangeFrom}-${s.rangeTo}`);
-  else if (s.listPick === 'lines' && /\d/.test(s.linesSpec)) parts.push('lines', s.linesSpec);
+  // An empty delimiter is not a cut point — the backend leaves the content untouched for one,
+  // so emitting the modifier would put a step in the token that does nothing. Same care the
+  // `lines` spec takes about needing a digit.
+  if (s.split !== 'none' && s.splitDelim.length > 0) {
+    parts.push(s.split + (s.splitLast ? 'last' : ''), s.splitDelim);
+  }
+  if (s.listPick === 'range') {
+    const arg = spanText(s.rangeFrom, s.rangeTo);
+    // Both ends open carries no bound; the backend would read the bare "-" as a non-argument
+    // and leave `range` inert, so there is nothing honest to write.
+    if (arg !== null) parts.push('range', arg);
+  } else if (s.listPick === 'lines' && /\d/.test(s.linesSpec)) parts.push('lines', s.linesSpec);
   if (s.sort) parts.push('sort');
   if (s.dedupe) parts.push('dedupe');
   if (s.reverse) parts.push('reverse');
@@ -206,6 +294,10 @@ function buildModifierParts(s: TransformState): string[] {
   // parseInt('@') = NaN, set `unmodeled`, and the popover was read-only forever — a trap the
   // editor laid for itself with one click. Until the name is finished the chain keeps the fixed
   // number, which is a valid token and exactly what the field beside it still shows.
+  if (s.extract === 'words') {
+    const arg = spanText(s.wordsFrom, s.wordsTo);
+    if (arg !== null) parts.push('words', arg);
+  }
   const extractArg = isArgRef(s.extractRef) ? s.extractRef : String(s.extractN);
   if (s.extract === 'line') parts.push('line', extractArg);
   else if (s.extract === 'word') parts.push('word', extractArg);
@@ -224,6 +316,33 @@ function splitLines(t: string): string[] {
   return t.replace(/\r\n/g, '\n').split('\n');
 }
 
+// Mirror of the backend SliceWords, offset-for-offset. It returns a SUBSTRING rather than
+// splitting and re-joining, so the whitespace between the kept words survives exactly — a
+// preview built on `split(/\s+/).join(' ')` would quietly show normalised spacing that runtime
+// never produces. Same separator set as word:N (space, tab, CR, LF), not /\s/, which would also
+// match Unicode spaces the backend leaves inside a word.
+const isWordSeparator = (c: string) => c === ' ' || c === '\t' || c === '\n' || c === '\r';
+
+function sliceWords(content: string, from: number, to: number): string {
+  if (!content || to < 1) return '';
+  const f = from < 1 ? 1 : from;
+  let start = -1;
+  let end = -1;
+  let index = 0;
+  let i = 0;
+  while (i < content.length) {
+    while (i < content.length && isWordSeparator(content[i])) i++;
+    if (i >= content.length) break;
+    const wordStart = i;
+    while (i < content.length && !isWordSeparator(content[i])) i++;
+    index++;
+    if (index === f) start = wordStart;
+    if (index <= to) end = i;
+    if (index >= to) break;
+  }
+  return start < 0 || end <= start ? '' : content.slice(start, end);
+}
+
 // Mirror of backend ApplyClipboardModifiers — used for the live preview only.
 // Every backend modifier needs a mirrored branch here or the preview lies.
 /**
@@ -232,8 +351,12 @@ function splitLines(t: string): string[] {
  * result for index 1 when the real index comes from a variable is the same class of lie as the
  * WaitImage 100%-confidence footgun: authoritative-looking and wrong.
  */
+/** Only line/word read `extractRef`; a word SPAN carries its bounds in wordsFrom/wordsTo, so
+ *  asking about the reference field there would answer about a leftover from another mode. */
+const extractUsesRef = (s: TransformState): boolean => s.extract === 'line' || s.extract === 'word';
+
 export const previewIsRuntimeDependent = (s: TransformState): boolean =>
-  (s.extract !== 'none' && isArgRef(s.extractRef)) || (s.limit !== 'none' && isArgRef(s.limitRef));
+  (extractUsesRef(s) && isArgRef(s.extractRef)) || (s.limit !== 'none' && isArgRef(s.limitRef));
 
 /**
  * The reference field holds something the backend would NOT read as a reference — in practice just
@@ -245,7 +368,7 @@ export const previewIsRuntimeDependent = (s: TransformState): boolean =>
  * that would never be resolved. Surfaces say the reference is unfinished instead.
  */
 export const argRefIsUnfinished = (s: TransformState): boolean =>
-  (s.extract !== 'none' && !!s.extractRef && !isArgRef(s.extractRef)) ||
+  (extractUsesRef(s) && !!s.extractRef && !isArgRef(s.extractRef)) ||
   (s.limit !== 'none' && !!s.limitRef && !isArgRef(s.limitRef));
 
 export function applyTransformPreview(raw: string, s: TransformState): string {
@@ -259,9 +382,19 @@ export function applyTransformPreview(raw: string, s: TransformState): string {
     r = items.length > 0 ? items[0] : '';
   }
   if (s.trim) r = r.trim();
+  if (s.split !== 'none' && s.splitDelim.length > 0) {
+    // OrdinalIgnoreCase on the backend — fold both sides to find the index, then cut the
+    // ORIGINAL so the surviving text keeps its own casing.
+    const hay = r.toLowerCase();
+    const needle = s.splitDelim.toLowerCase();
+    const at = s.splitLast ? hay.lastIndexOf(needle) : hay.indexOf(needle);
+    // Delimiter absent → empty, never the whole content (the backend's fail-closed rule).
+    if (at < 0) r = '';
+    else r = s.split === 'before' ? r.slice(0, at) : r.slice(at + s.splitDelim.length);
+  }
   if (s.listPick === 'range') {
     const lines = splitLines(r);
-    let a = s.rangeFrom, b = s.rangeTo;
+    let a = s.rangeFrom ?? 1, b = s.rangeTo ?? Number.POSITIVE_INFINITY;
     if (a > b) [a, b] = [b, a];
     const from = Math.max(1, a);
     const to = Math.min(lines.length, b);
@@ -300,7 +433,9 @@ export function applyTransformPreview(raw: string, s: TransformState): string {
   if (s.join) r = splitLines(r).join(s.joinSep);
   // An unfinished reference emits the NUMBER (see buildModifierParts), so previewing the number
   // is the honest thing — it is literally what the token beside this preview says.
-  if (s.extract === 'line') {
+  if (s.extract === 'words') {
+    r = sliceWords(r, s.wordsFrom ?? 1, s.wordsTo ?? Number.POSITIVE_INFINITY);
+  } else if (s.extract === 'line') {
     const lines = splitLines(r);
     r = lines[s.extractN - 1] ?? '';
   } else if (s.extract === 'word') {
@@ -460,16 +595,36 @@ function parseModifierParts(parts: string[], from: number): TransformState {
         // the flag only makes the explanation name the real cause.
         if (argIsRef) { state.unmodeled = true; sawRefArg = true; }
         else {
-          const m = arg !== undefined ? /^(\d+)-(\d+)$/.exec(arg) : null;
-          if (m) {
-            let a = Number(m[1]);
-            let b = Number(m[2]);
-            if (a > b) [a, b] = [b, a];   // the backend swaps too, so this round-trips in meaning
+          const span = parseSpanState(arg);
+          if (span) {
             state.listPick = 'range';
-            state.rangeFrom = a;
-            state.rangeTo = b;
+            state.rangeFrom = span.from;
+            state.rangeTo = span.to;
           } else lose();
         }
+        break;
+      case 'words':
+        // Same treatment as range — the bounds are a literal span, a reference cannot be shown.
+        if (argIsRef) { state.unmodeled = true; sawRefArg = true; }
+        else {
+          const span = parseSpanState(arg);
+          if (span) {
+            state.extract = 'words';
+            state.wordsFrom = span.from;
+            state.wordsTo = span.to;
+          } else lose();
+        }
+        break;
+      case 'before':
+      case 'after':
+      case 'beforelast':
+      case 'afterlast':
+        // Raw arity, like join: the delimiter is whatever the next segment says, read from the
+        // ORIGINAL part (the switch matched on a lowercased copy) and re-emitted verbatim, so
+        // anything the backend consumes here round-trips byte-for-byte.
+        state.split = p.startsWith('before') ? 'before' : 'after';
+        state.splitLast = p.endsWith('last');
+        state.splitDelim = parts[i + 1] !== undefined ? parts[i + 1] : '';
         break;
       case 'lines':
         // Same reference treatment as range. The spec is re-emitted VERBATIM, so anything the

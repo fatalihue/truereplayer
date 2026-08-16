@@ -15,6 +15,7 @@ import {
   type Extract,
   type Limit,
   type ListPick,
+  type Split,
   type TransformState,
 } from './clipboardModifiers';
 
@@ -67,6 +68,10 @@ export function ClipboardSurface({ state, onStateChange, onBack, onReset, origin
 
   const linesActive =
     state.listPick !== 'none' || state.sort || state.dedupe || state.reverse || state.join;
+
+  // A split with no delimiter emits nothing and does nothing, so the badge must not claim
+  // the step is doing work.
+  const splitActive = state.split !== 'none' && state.splitDelim.length > 0;
 
   // Same read-only rule as the chip popover: this surface rebuilds the whole token from state,
   // so a chain carrying an unrepresentable modifier must not be edited here.
@@ -172,7 +177,58 @@ export function ClipboardSurface({ state, onStateChange, onBack, onReset, origin
             />
           </Step>
 
-          <Step n={3} title="Lines" active={linesActive}>
+          <Step n={3} title="Split at" active={splitActive}>
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <SegmentedControl<Split>
+                  ariaLabel="Split at a delimiter"
+                  options={[
+                    { value: 'none', label: 'Off' },
+                    { value: 'before', label: 'Before' },
+                    { value: 'after', label: 'After' },
+                  ]}
+                  value={state.split}
+                  onChange={(v) => set({ split: v })}
+                />
+                {state.split !== 'none' && (
+                  <>
+                    <input
+                      type="text"
+                      value={state.splitDelim}
+                      // Same grammar filter as the join separator. A SPACE is deliberately
+                      // allowed — " - " is the delimiter this control exists for.
+                      onChange={(e) => set({ splitDelim: e.target.value.replace(/[{}:]/g, '') })}
+                      placeholder=" - "
+                      aria-label="Delimiter"
+                      data-tip={tt(
+                        'The text to cut at — it is not kept. { } : are reserved by the token grammar and stripped; spaces are fine.',
+                        'O texto onde cortar — ele não entra no resultado. { } : são reservados pela gramática do token e removidos; espaços podem.',
+                      )}
+                      className="h-8 w-28 px-2 text-xs font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid placeholder:text-text-disabled"
+                    />
+                    <CheckRow
+                      checked={state.splitLast}
+                      onChange={() => set({ splitLast: !state.splitLast })}
+                      label="Last match"
+                    />
+                  </>
+                )}
+              </div>
+              <div className="text-[11px] text-text-tertiary leading-snug">
+                {state.split === 'none'
+                  ? tt(
+                      'Off: the whole text goes on to the next step.',
+                      'Desligado: o texto inteiro segue para a próxima etapa.',
+                    )
+                  : tt(
+                      'If the delimiter is not in the text, this step yields nothing — not everything. That is deliberate: the other answer pastes a whole clipboard where you asked for a fragment.',
+                      'Se o delimitador não estiver no texto, esta etapa não devolve nada — e não devolve tudo. É de propósito: a outra resposta colaria a área de transferência inteira onde você pediu um pedaço.',
+                    )}
+              </div>
+            </div>
+          </Step>
+
+          <Step n={4} title="Lines" active={linesActive}>
             <div className="space-y-2">
               <div className="flex items-center gap-2 flex-wrap">
                 <SegmentedControl<ListPick>
@@ -190,7 +246,10 @@ export function ClipboardSurface({ state, onStateChange, onBack, onReset, origin
                     <NumberInput
                       value={state.rangeFrom}
                       onChange={(n) => set({ rangeFrom: Math.max(1, n) })}
+                      onClear={() => set({ rangeFrom: null })}
                       min={1}
+                      placeholder="1"
+                      ariaLabel="First line"
                       inputWidth="w-14"
                       inputHeight="h-8"
                     />
@@ -198,7 +257,10 @@ export function ClipboardSurface({ state, onStateChange, onBack, onReset, origin
                     <NumberInput
                       value={state.rangeTo}
                       onChange={(n) => set({ rangeTo: Math.max(1, n) })}
+                      onClear={() => set({ rangeTo: null })}
                       min={1}
+                      placeholder="end"
+                      ariaLabel="Last line"
                       inputWidth="w-14"
                       inputHeight="h-8"
                     />
@@ -241,7 +303,7 @@ export function ClipboardSurface({ state, onStateChange, onBack, onReset, origin
             </div>
           </Step>
 
-          <Step n={4} title="Extract" active={state.extract !== 'none'}>
+          <Step n={5} title="Extract" active={state.extract !== 'none'}>
             <div className="flex items-center gap-2 flex-wrap">
               <SegmentedControl<Extract>
                 ariaLabel="Extract"
@@ -249,11 +311,12 @@ export function ClipboardSurface({ state, onStateChange, onBack, onReset, origin
                   { value: 'none', label: 'Everything' },
                   { value: 'line', label: 'Line #' },
                   { value: 'word', label: 'Word #' },
+                  { value: 'words', label: 'Words' },
                 ]}
                 value={state.extract}
                 onChange={(v) => set({ extract: v })}
               />
-              {state.extract !== 'none' && (
+              {(state.extract === 'line' || state.extract === 'word') && (
                 <ArgInput
                   value={state.extractN}
                   onChange={(n) => set({ extractN: Math.max(1, n) })}
@@ -264,10 +327,41 @@ export function ClipboardSurface({ state, onStateChange, onBack, onReset, origin
                   numTip={numTip}
                 />
               )}
+              {state.extract === 'words' && (
+                <span
+                  className="flex items-center gap-1"
+                  data-tip={tt(
+                    'A span of words, kept with the original spacing between them. Leave a side blank for an open end.',
+                    'Um intervalo de palavras, mantendo o espaçamento original entre elas. Deixe um lado em branco para não ter limite.',
+                  )}
+                >
+                  <NumberInput
+                    value={state.wordsFrom}
+                    onChange={(n) => set({ wordsFrom: Math.max(1, n) })}
+                    onClear={() => set({ wordsFrom: null })}
+                    min={1}
+                    placeholder="1"
+                    ariaLabel="First word"
+                    inputWidth="w-14"
+                    inputHeight="h-8"
+                  />
+                  <span className="text-[11px] text-text-tertiary">–</span>
+                  <NumberInput
+                    value={state.wordsTo}
+                    onChange={(n) => set({ wordsTo: Math.max(1, n) })}
+                    onClear={() => set({ wordsTo: null })}
+                    min={1}
+                    placeholder="end"
+                    ariaLabel="Last word"
+                    inputWidth="w-14"
+                    inputHeight="h-8"
+                  />
+                </span>
+              )}
             </div>
           </Step>
 
-          <Step n={5} title="Limit length" active={state.limit !== 'none'}>
+          <Step n={6} title="Limit length" active={state.limit !== 'none'}>
             <div className="flex items-center gap-2 flex-wrap">
               <SegmentedControl<Limit>
                 ariaLabel="Limit length"
@@ -293,7 +387,7 @@ export function ClipboardSurface({ state, onStateChange, onBack, onReset, origin
             </div>
           </Step>
 
-          <Step n={6} title="Case" active={state.case !== 'none'}>
+          <Step n={7} title="Case" active={state.case !== 'none'}>
             {/* Wrap like Steps 2-4 so the block-level SegmentedControl track hugs its
                 buttons instead of stretching to the full config-column width (which left
                 a wide empty pill after the last "Title" segment). */}

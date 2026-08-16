@@ -205,27 +205,36 @@ export function ArgInput({
 export function NumInput({
   value,
   onChange,
+  onClear,
   disabled,
   min = 0,
   width = 54,
   thousands,
   suffix,
   suffixInside,
+  placeholder,
+  ariaLabel,
 }: {
-  value: number;
+  // `null` renders the field blank with `placeholder` showing. Pass `onClear` alongside it when
+  // blank carries meaning the parent must store — an open-ended span uses this for "no bound".
+  value: number | null;
   onChange: (n: number) => void;
+  onClear?: () => void;
   disabled?: boolean;
   min?: number;
   width?: number;
   thousands?: boolean;
   suffix?: string;
   suffixInside?: boolean;
+  placeholder?: string;
+  ariaLabel?: string;
 }) {
   return (
     <span onClick={(e) => e.stopPropagation()} style={{ display: 'inline-flex', width }}>
       <NumberInput
         value={value}
         onChange={onChange}
+        onClear={onClear}
         min={min}
         disabled={disabled}
         inputWidth="w-full"
@@ -233,6 +242,8 @@ export function NumInput({
         thousands={thousands}
         suffix={suffix}
         suffixInside={suffixInside}
+        placeholder={placeholder}
+        ariaLabel={ariaLabel}
       />
     </span>
   );

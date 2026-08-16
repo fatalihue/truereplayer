@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { Section, CheckRow, RadioRow, RadioGroup, NumInput, ArgInput } from './popoverAtoms';
 import { CheckboxBox } from '../Checkbox';
+import { SegmentedControl } from '../common/SegmentedControl';
 import { useTt } from '../../state/LanguageContext';
 import {
   applyTransformPreview,
@@ -10,6 +11,7 @@ import {
   type Extract,
   type Limit,
   type ListPick,
+  type Split,
   type TransformState,
 } from './clipboardModifiers';
 
@@ -70,6 +72,10 @@ export function ClipboardModifierBody({
                     'Pegar este número de uma variável — @nome, @counter ou @row');
   const numTip = tt('Back to a fixed number', 'Voltar para um número fixo');
   const setListPick = (v: ListPick) => setState((s) => ({ ...s, listPick: v }));
+  // A span bound of null is an OPEN end ("word 6 onwards"), which is why these go through
+  // onClear rather than clamping an empty field back to a number.
+  const setSpan = (k: 'wordsFrom' | 'wordsTo' | 'rangeFrom' | 'rangeTo', n: number | null) =>
+    setState((s) => ({ ...s, [k]: n === null ? null : Math.max(1, n) }));
 
   // The chain holds something this editor cannot model, so every control is inert: touching one
   // would rebuild the token and drop the part we did not understand. Say so instead of letting
@@ -160,6 +166,55 @@ export function ClipboardModifierBody({
         </div>
       </Section>
 
+      {/* Cut at a delimiter. Sits next to Trim because it reshapes the RAW text — in the
+          emitted chain it runs right after trim, ahead of every line op. */}
+      <Section label="Split at">
+        <div className="py-0.5">
+          <SegmentedControl<Split>
+            dense
+            grow
+            ariaLabel="Split at a delimiter"
+            options={[
+              { value: 'none', label: 'Off' },
+              { value: 'before', label: 'Before' },
+              { value: 'after', label: 'After' },
+            ]}
+            value={state.split}
+            onChange={(v) => setState((s) => ({ ...s, split: v }))}
+          />
+        </div>
+        <div className="flex items-center gap-2 py-0.5">
+          <input
+            type="text"
+            value={state.splitDelim}
+            // Same grammar filter as the join separator — '{', '}' and ':' would break the
+            // token apart. A SPACE is deliberately allowed: " - " is the delimiter this
+            // whole control exists for.
+            onChange={(e) => setState((s) => ({ ...s, splitDelim: e.target.value.replace(/[{}:]/g, '') }))}
+            disabled={state.split === 'none'}
+            placeholder=" - "
+            aria-label="Delimiter"
+            data-tip={tt(
+              'The text to cut at. It is not kept. Missing from the content? The step yields nothing, rather than everything.',
+              'O texto onde cortar. Ele não entra no resultado. Não existir no conteúdo? O passo não devolve nada, em vez de devolver tudo.',
+            )}
+            className="h-7 w-[104px] px-1.5 text-xs font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid disabled:opacity-50"
+          />
+          <button
+            type="button"
+            role="checkbox"
+            aria-checked={state.splitLast}
+            disabled={state.split === 'none'}
+            onClick={() => setState((s) => ({ ...s, splitLast: !s.splitLast }))}
+            data-tip={tt('Cut at the last occurrence instead of the first', 'Cortar na última ocorrência em vez da primeira')}
+            className="flex items-center gap-2 text-xs text-text-secondary hover:text-text-primary disabled:opacity-50"
+          >
+            <CheckboxBox checked={state.splitLast} />
+            <span>Last match</span>
+          </button>
+        </div>
+      </Section>
+
       <Section label="Extract">
         <RadioGroup label="Extract">
           <RadioRow
@@ -201,6 +256,40 @@ export function ClipboardModifierBody({
               />
             }
           />
+          <RadioRow
+            checked={state.extract === 'words'}
+            onChange={() => setExtract('words')}
+            label="Words"
+            input={
+              <span
+                className="flex items-center gap-1"
+                data-tip={tt(
+                  'A span of words, kept with the original spacing. Leave a side blank for an open end.',
+                  'Um intervalo de palavras, com o espaçamento original. Deixe um lado em branco para não ter limite.',
+                )}
+              >
+                <NumInput
+                  value={state.wordsFrom}
+                  onChange={(n) => setSpan('wordsFrom', n)}
+                  onClear={() => setSpan('wordsFrom', null)}
+                  disabled={state.extract !== 'words'}
+                  min={1}
+                  placeholder="1"
+                  ariaLabel="First word"
+                />
+                <span className="text-[11px] text-text-tertiary">–</span>
+                <NumInput
+                  value={state.wordsTo}
+                  onChange={(n) => setSpan('wordsTo', n)}
+                  onClear={() => setSpan('wordsTo', null)}
+                  disabled={state.extract !== 'words'}
+                  min={1}
+                  placeholder="end"
+                  ariaLabel="Last word"
+                />
+              </span>
+            }
+          />
         </RadioGroup>
       </Section>
 
@@ -222,16 +311,22 @@ export function ClipboardModifierBody({
               <span className="flex items-center gap-1">
                 <NumInput
                   value={state.rangeFrom}
-                  onChange={(n) => setState((s) => ({ ...s, rangeFrom: Math.max(1, n) }))}
+                  onChange={(n) => setSpan('rangeFrom', n)}
+                  onClear={() => setSpan('rangeFrom', null)}
                   disabled={state.listPick !== 'range'}
                   min={1}
+                  placeholder="1"
+                  ariaLabel="First line"
                 />
                 <span className="text-[11px] text-text-tertiary">–</span>
                 <NumInput
                   value={state.rangeTo}
-                  onChange={(n) => setState((s) => ({ ...s, rangeTo: Math.max(1, n) }))}
+                  onChange={(n) => setSpan('rangeTo', n)}
+                  onClear={() => setSpan('rangeTo', null)}
                   disabled={state.listPick !== 'range'}
                   min={1}
+                  placeholder="end"
+                  ariaLabel="Last line"
                 />
               </span>
             }

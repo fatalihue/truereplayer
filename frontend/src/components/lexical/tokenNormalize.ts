@@ -14,6 +14,8 @@
 // Backend processing is case-insensitive so this is purely cosmetic; existing
 // saved actions that contain `{enter}` continue to work and get normalised on
 // next edit.
+import { verbatimArgIndices } from './clipboardModifiers';
+
 const COMPOUND_NAMES: Record<string, string> = {
   datetime: 'DateTime',
   pageup: 'PageUp',
@@ -49,6 +51,8 @@ export function normalizeToken(token: string): string {
   const keepArgsVerbatim = VERBATIM_ARG_NAMES.has(lowerName);
   // {row:Column} and {rownext:Column} both carry a verbatim column name as their first arg.
   const isRow = lowerName === 'row' || lowerName === 'rownext';
+  // The modifier tail starts after the column name for row/rownext, at the top otherwise.
+  const verbatimArgs = keepArgsVerbatim ? new Set<number>() : verbatimArgIndices(mods, isRow ? 1 : 0);
   const normalizedMods = mods.map((p, idx) => {
     // Name-bearing tokens ({var:Name}/{clip:Name}/{input:...}) keep args untouched.
     if (keepArgsVerbatim) return p;
@@ -57,9 +61,11 @@ export function normalizeToken(token: string): string {
     // column literally named "join" would shield the next segment from folding —
     // cosmetic only, the backend lower-cases modifiers itself.)
     if (isRow && idx === 0) return p;
-    // join's argument is freeform separator TEXT — case-folding it would change
-    // what actually gets typed (join:AND ≠ join:and). Keep it verbatim.
-    if (idx > 0 && mods[idx - 1].toLowerCase() === 'join') return p;
+    // The freeform-text arguments — a join separator or a split delimiter — are TEXT, and
+    // case-folding them rewrites what the user typed (join:AND ≠ join:and on screen). Which
+    // segments those are comes from the arity walk itself, so this can never disagree with the
+    // engine about who owns a segment.
+    if (verbatimArgs.has(idx)) return p;
     return /^[a-zA-Z]+$/.test(p) ? p.toLowerCase() : p;
   });
   return `{${[normalizedName, ...normalizedMods].join(':')}}`;
