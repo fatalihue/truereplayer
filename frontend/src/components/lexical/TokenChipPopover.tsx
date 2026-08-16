@@ -7,9 +7,13 @@ import {
   buildClipboardToken,
   buildRowToken,
   buildRowNextToken,
+  buildNameToken,
+  buildWinClipToken,
   parseClipboardToken,
   parseRowToken,
   parseRowNextToken,
+  parseNameToken,
+  parseWinClipToken,
   type TransformState,
 } from './clipboardModifiers';
 import { NumInput, Section } from './popoverAtoms';
@@ -99,13 +103,6 @@ function parseDelay(token: string): { ms: number } {
   const parts = inner.split(':');
   const parsed = parts[1] !== undefined ? parseInt(parts[1], 10) : 500;
   return { ms: !Number.isFinite(parsed) || parsed < 0 ? 500 : parsed };
-}
-
-function parseWinClip(token: string): { index: number } {
-  const inner = token.slice(1, -1);
-  const parts = inner.split(':');
-  const parsed = parts[1] !== undefined ? parseInt(parts[1], 10) : 1;
-  return { index: !Number.isFinite(parsed) || parsed < 1 ? 1 : parsed };
 }
 
 function parseRandom(token: string): { min: number; max: number } {
@@ -459,23 +456,57 @@ function RandomEditor({ token, onChange }: { token: string; onChange: (t: string
 // close guard as the others). The note carries the two things a user must know: the
 // history has to be enabled, and it can hold anything recently copied — passwords too.
 function WinClipEditor({ token, onChange }: { token: string; onChange: (t: string) => void }) {
-  const initial = parseWinClip(token);
-  const [index, setIndex] = useState(initial.index);
+  const [index, setIndex] = useState(() => parseWinClipToken(token).index);
+  const [state, setState] = useState<TransformState>(() => parseWinClipToken(token).state);
+  const [displayToken, setDisplayToken] = useState(() => normalizeToken(token));
 
-  const update = (v: number) => { const c = v < 1 ? 1 : v; setIndex(c); onChange(`{winclip:${c}}`); };
+  // Same emit discipline as RowColEditor: never on mount, never while the chain carries
+  // something the parser could not represent. This editor used to rebuild `{winclip:N}` from the
+  // index alone, so a hand-typed {winclip:2:trim} lost its chain the moment the chip was touched.
+  const emit = (i: number, s: TransformState) => {
+    if (s.unmodeled) return;
+    const t = buildWinClipToken(i, s);
+    setDisplayToken(t);
+    onChange(t);
+  };
+
+  const update = (v: number) => {
+    if (state.unmodeled) return;
+    const c = v < 1 ? 1 : v;
+    setIndex(c);
+    emit(c, state);
+  };
+
+  const updateState: React.Dispatch<React.SetStateAction<TransformState>> = (action) => {
+    const next = typeof action === 'function' ? action(state) : action;
+    setState(next);
+    emit(index, next);
+  };
 
   return (
-    <Section label="Clipboard history">
-      <div className="flex items-center gap-2 py-1">
-        <span className="text-[11px] text-text-tertiary">item</span>
-        <NumInput value={index} onChange={update} min={1} width={70} />
-        <span className="text-[11px] text-text-tertiary">1 = most recent</span>
-      </div>
-      <div className="text-[10px] text-text-tertiary mt-1 leading-relaxed">
-        Item {index} of the Windows clipboard history (Win+V), newest first. Needs clipboard history
-        turned on. It can hold anything recently copied by any app — including passwords.
-      </div>
-    </Section>
+    <>
+      <Section label="Clipboard history">
+        <div className="flex items-center gap-2 py-1">
+          <span className="text-[11px] text-text-tertiary">item</span>
+          <NumInput value={index} onChange={update} min={1} width={70} disabled={state.unmodeled} />
+          <span className="text-[11px] text-text-tertiary">1 = most recent</span>
+        </div>
+        <div className="text-[10px] text-text-tertiary mt-1 leading-relaxed">
+          {state.unmodeled
+            ? 'Read-only — this token carries a modifier chain the editor cannot rebuild (see below).'
+            : `Item ${index} of the Windows clipboard history (Win+V), newest first. Needs clipboard history turned on. It can hold anything recently copied by any app — including passwords.`}
+        </div>
+      </Section>
+      <ClipboardModifierBody
+        state={state}
+        setState={updateState}
+        clipRaw=""
+        clipReady
+        sourceUnknown
+        token={displayToken}
+        sourceLabel="History item"
+      />
+    </>
   );
 }
 
@@ -493,36 +524,72 @@ function NameEditor({
   tokenName: 'var' | 'clip';
   onChange: (t: string) => void;
 }) {
-  const [name, setName] = useState(() => parseNameArg(token));
+  const [name, setName] = useState(() => parseNameToken(token, tokenName).name);
+  const [state, setState] = useState<TransformState>(() => parseNameToken(token, tokenName).state);
+  const [displayToken, setDisplayToken] = useState(() => normalizeToken(token));
   const label = tokenName === 'var' ? 'Variable name' : 'Slot name';
 
+  // The name used to be "everything after the first ':'", so a {clip:pedido:trim} arrived here as
+  // the name "pedido:trim", got its colon stripped by the charset filter, and was committed as
+  // {clip:pedidotrim} — a slot that does not exist. Parsing the chain properly and refusing to
+  // rebuild what we could not represent is what closes that.
+  const emit = (n: string, s: TransformState) => {
+    if (!n || s.unmodeled) return;
+    const t = buildNameToken(tokenName, n, s);
+    setDisplayToken(t);
+    onChange(t);
+  };
+
   const update = (raw: string) => {
+    if (state.unmodeled) return;
     // Same charset the typing grammar chips ([A-Za-z0-9_]) — anything else
     // would produce a token the editor immediately un-chips on round-trip.
     const clean = raw.replace(/[^A-Za-z0-9_]/g, '');
     setName(clean);
-    if (clean.length > 0) onChange(`{${tokenName}:${clean}}`);
+    emit(clean, state);
+  };
+
+  const updateState: React.Dispatch<React.SetStateAction<TransformState>> = (action) => {
+    const next = typeof action === 'function' ? action(state) : action;
+    setState(next);
+    emit(name, next);
   };
 
   return (
-    <Section label={label}>
-      <div className="py-1">
-        <input
-          type="text"
-          value={name}
-          onChange={(e) => update(e.target.value)}
-          autoFocus
-          spellCheck={false}
-          placeholder={tokenName === 'var' ? 'name' : '1'}
-          className="h-7 w-full px-2 text-xs font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid placeholder:text-text-disabled"
-        />
-      </div>
-      <div className="text-[10px] text-text-tertiary mt-1">
-        {tokenName === 'var'
-          ? 'Replaced with the value a Set Variable action stored under this name.'
-          : 'Replaced with the selection a Copy to Slot action (or the capture hotkey) stored in this slot.'}
-      </div>
-    </Section>
+    <>
+      <Section label={label}>
+        <div className="py-1">
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => update(e.target.value)}
+            readOnly={state.unmodeled}
+            autoFocus={!state.unmodeled}
+            spellCheck={false}
+            placeholder={tokenName === 'var' ? 'name' : '1'}
+            className={`h-7 w-full px-2 text-xs font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none placeholder:text-text-disabled ${
+              state.unmodeled ? 'opacity-60 cursor-not-allowed' : 'focus:border-accent-solid'
+            }`}
+          />
+        </div>
+        <div className="text-[10px] text-text-tertiary mt-1">
+          {state.unmodeled
+            ? 'Read-only — this token carries a modifier chain the editor cannot rebuild (see below).'
+            : tokenName === 'var'
+              ? 'Replaced with the value a Set Variable action stored under this name.'
+              : 'Replaced with the selection a Copy to Slot action (or the capture hotkey) stored in this slot.'}
+        </div>
+      </Section>
+      <ClipboardModifierBody
+        state={state}
+        setState={updateState}
+        clipRaw=""
+        clipReady
+        sourceUnknown
+        token={displayToken}
+        sourceLabel={tokenName === 'var' ? 'Variable value' : 'Slot text'}
+      />
+    </>
   );
 }
 

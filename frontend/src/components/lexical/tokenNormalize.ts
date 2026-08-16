@@ -24,16 +24,19 @@ const COMPOUND_NAMES: Record<string, string> = {
   rownext: 'RowNext',
 };
 
-// Tokens whose args are user-chosen NAMES (variable / clip slot) or free text
-// (the Ask-Input label + menu options), not modifiers — case-folding
-// {var:MyVar} to {var:myvar} would still run (backend lookups are case-insensitive)
-// but would rewrite the user's text on every open/close. Keep every arg verbatim,
-// same rationale as join's separator. A label with ':' survives via the split+rejoin
-// on ':' below (the parts are re-joined with ':'), so {input:Label|menu:a,b,c} and
-// {input:Enter time (HH:MM)} both round-trip unchanged.
-// {row:Column[:mods]} is NOT here: its FIRST arg is a verbatim column name, but the
-// segments after it are clipboard-style modifiers and follow the modifier rules.
-const VERBATIM_ARG_NAMES = new Set(['var', 'clip', 'input']);
+// {input:...} is the one token whose WHOLE argument is free text — the Ask-Input label plus its
+// menu options, which may themselves contain ':'. It survives via the split+rejoin on ':' below,
+// so {input:Label|menu:a,b,c} and {input:Enter time (HH:MM)} both round-trip unchanged.
+//
+// {var:Name} and {clip:Name} used to live here too, back when their whole argument was a name.
+// They now carry a modifier tail like {row:Column[:mods]}, so they moved to NAME_FIRST_ARG_NAMES:
+// the FIRST arg stays verbatim (case-folding {var:MyVar} would rewrite the user's text on every
+// open/close, and backend lookups are case-insensitive anyway) while the segments after it are
+// clipboard-style modifiers and follow the modifier rules.
+const VERBATIM_ARG_NAMES = new Set(['input']);
+
+// Heads whose first argument is a user-chosen name/column, followed by an optional modifier chain.
+const NAME_FIRST_ARG_NAMES = new Set(['row', 'rownext', 'var', 'clip']);
 
 export function normalizeToken(token: string): string {
   if (token.length < 2 || token[0] !== '{' || token[token.length - 1] !== '}') {
@@ -49,8 +52,9 @@ export function normalizeToken(token: string): string {
     COMPOUND_NAMES[lowerName] ?? name.charAt(0).toUpperCase() + name.slice(1).toLowerCase();
   const mods = parts.slice(1);
   const keepArgsVerbatim = VERBATIM_ARG_NAMES.has(lowerName);
-  // {row:Column} and {rownext:Column} both carry a verbatim column name as their first arg.
-  const isRow = lowerName === 'row' || lowerName === 'rownext';
+  // {row:Column}, {rownext:Column}, {var:Name} and {clip:Name} all carry a verbatim name as
+  // their first arg, with the modifier chain starting after it.
+  const isRow = NAME_FIRST_ARG_NAMES.has(lowerName);
   // The modifier tail starts after the column name for row/rownext, at the top otherwise.
   const verbatimArgs = keepArgsVerbatim ? new Set<number>() : verbatimArgIndices(mods, isRow ? 1 : 0);
   const normalizedMods = mods.map((p, idx) => {

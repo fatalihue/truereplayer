@@ -26,6 +26,12 @@ interface ClipboardModifierBodyProps {
   /** Label above the raw-source box (default "Clipboard"; the row-cell chip
    *  passes "Cell (first row)"). */
   sourceLabel?: string;
+  /** The source text is not knowable while editing — {var:}, {clip:} and {winclip:} read run
+   *  state that lives in the engine, not in this process. The source and preview boxes then say
+   *  so instead of computing from an empty string: "(empty)" would read as "your chain produces
+   *  nothing", which is a different claim and the same class of authoritative-looking lie as a
+   *  preview built from a reference argument's imaginary value. */
+  sourceUnknown?: boolean;
   /** Show the "One line per use" control. CLIPBOARD ONLY — {row:col} / {rownext:col}
    *  share this body but their heads have no 'next' modifier, so the control would
    *  promise a behaviour their runtime never performs. Off by default so a consumer
@@ -44,6 +50,7 @@ export function ClipboardModifierBody({
   clipReady,
   token: tokenOverride,
   sourceLabel = 'Clipboard',
+  sourceUnknown = false,
   showNext = false,
 }: ClipboardModifierBodyProps) {
   const tt = useTt();
@@ -439,7 +446,11 @@ export function ClipboardModifierBody({
           className="font-mono text-[10.5px] text-text-secondary bg-white/[0.03] border-l-2 border-border-subtle px-2 py-0.5 mb-1.5 rounded-r whitespace-pre-wrap break-all max-h-[36px] overflow-auto"
           style={{ lineHeight: 1.35 }}
         >
-          {clipReady ? (
+          {sourceUnknown ? (
+            <span className="italic text-text-disabled">
+              {tt('Known only while the macro runs', 'Só existe enquanto a macro roda')}
+            </span>
+          ) : clipReady ? (
             clipRaw === '' ? (
               <span className="italic text-text-disabled">(empty)</span>
             ) : (
@@ -470,7 +481,12 @@ export function ClipboardModifierBody({
         >
           {/* Unfinished FIRST: with one good reference and one half-typed "@", the actionable
               message is the one about the field still waiting on a name. */}
-          {refUnfinished
+          {sourceUnknown
+            ? <span className="italic text-text-disabled">
+                {tt('No preview — this value is read when the macro runs.',
+                    'Sem prévia — este valor é lido quando a macro roda.')}
+              </span>
+            : refUnfinished
             ? <span className="italic" style={{ color: 'var(--color-recording-fg)' }}>
                 {tt('Finish the name after @ — until then the token keeps the fixed number.',
                     'Complete o nome depois do @ — até lá o token mantém o número fixo.')}

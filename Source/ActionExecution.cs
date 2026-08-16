@@ -4354,6 +4354,53 @@ namespace TrueReplayer.Services
             return false;
         }
 
+        private static readonly HashSet<string> SliceModifierNames = new(StringComparer.OrdinalIgnoreCase)
+            { "words", "before", "after", "beforelast", "afterlast" };
+
+        private static readonly HashSet<string> ListModifierNames = new(StringComparer.OrdinalIgnoreCase)
+            { "range", "lines", "sort", "dedupe", "reverse", "join" };
+
+        /// <summary>
+        /// True when the chain uses a modifier the walk LANDS on — never one it steps over as
+        /// somebody's argument. Both pins below delegate here for the reason the {clipboard:next}
+        /// pin does: deciding "does this chain use X?" with a regex means re-implementing the
+        /// argument-consumption walk in another dialect, and the two drift.
+        /// </summary>
+        private static bool ChainUsesAnyOf(string? modifierChain, HashSet<string> names, bool openSpanCounts)
+        {
+            if (string.IsNullOrEmpty(modifierChain)) return false;
+            var parts = modifierChain.Split(':');
+            for (int i = 0; i < parts.Length;)
+            {
+                if (names.Contains(parts[i])) return true;
+                // An OPEN-ended span is new even on a modifier that is not: an older build's
+                // closed-range parser refuses "6-", leaves the argument unconsumed, and `range`
+                // sits inert on the whole content.
+                if (openSpanCounts
+                    && string.Equals(parts[i], "range", StringComparison.OrdinalIgnoreCase)
+                    && i + 1 < parts.Length && IsOpenSpan(parts[i + 1])) return true;
+                i = StepModifier(parts, i, out _);
+            }
+            return false;
+        }
+
+        /// <summary>Text-slice modifiers (words / before / after / beforelast / afterlast) and
+        /// open-ended spans — everything this version added to the chain.</summary>
+        internal static bool ChainUsesSliceModifier(string? modifierChain)
+            => ChainUsesAnyOf(modifierChain, SliceModifierNames, openSpanCounts: true);
+
+        /// <summary>The list modifiers, which shipped in 2.8.0 and were never pinned.</summary>
+        internal static bool ChainUsesListModifier(string? modifierChain)
+            => ChainUsesAnyOf(modifierChain, ListModifierNames, openSpanCounts: false);
+
+        // "6-" or "-5" — a span whose missing side an older TryParseLineRange would reject.
+        private static bool IsOpenSpan(string s)
+        {
+            if (!TryParseSpan(s, out _, out _)) return false;
+            int dash = s.IndexOf('-');
+            return dash == 0 || dash == s.Length - 1;
+        }
+
         /// <summary>
         /// Applies modifier chain (e.g. "trim:line:1:first:8:upper") to clipboard content.
         /// Unknown modifiers are silently ignored so that future modifiers stay forward-compatible.
@@ -5320,8 +5367,12 @@ namespace TrueReplayer.Services
         // {winclip} means index 1, matching the editor chip (which defaults to 1) so a hand-typed
         // {winclip} resolves instead of pasting literally. Deliberately DISJOINT from {clip:name}
         // (in-app capture slots) and {clipboard} (the live OS clipboard). IgnoreCase like the others.
+        // {winclip} / {winclip:N} / {winclip:N:mods} / {winclip:mods}. Unambiguous because the
+        // index group is DIGITS ONLY: "{winclip:trim}" cannot match it, so `trim` falls through to
+        // the chain group and the index stays at its default of 1. (Before the chain existed,
+        // "{winclip:trim}" matched nothing at all and was typed out literally.)
         private static readonly Regex WinClipTokenRegex = new(
-            @"\{winclip(?::(\d+))?\}",
+            @"\{winclip(?::(\d+))?(?::([^}]+))?\}",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         // Resolves {winclip:N} against the Windows clipboard history. Fetches the history ONCE per
@@ -5333,7 +5384,8 @@ namespace TrueReplayer.Services
         // html pass REPLAYS it, so both flavors agree and the html pass skips the second history read.
         internal static async Task<string> ResolveWinClipTokensAsync(
             string text, DispatcherQueue dispatcherQueue,
-            bool escapeBracesInSubstitution, bool htmlEncodeSubstitution, TokenFlavorSync? sync = null)
+            bool escapeBracesInSubstitution, bool htmlEncodeSubstitution, TokenFlavorSync? sync = null,
+            RunCtx runCtx = default)
         {
             if (string.IsNullOrEmpty(text) || !WinClipTokenRegex.IsMatch(text)) return text;
             bool replaying = sync?.WinClipReplay is { Count: > 0 };
@@ -5358,6 +5410,11 @@ namespace TrueReplayer.Services
                         raw = history[n - 1]!;
                     sync?.WinClipRecord?.Add(raw);
                 }
+                // Modifiers run AFTER the record/replay split, on both flavors. They are pure, so
+                // applying them twice over the same recorded value lands on the same string — and
+                // recording the UNMODIFIED item keeps the replay queue meaning what it says.
+                if (m.Groups[2].Success)
+                    raw = ApplyClipboardModifiers(raw, m.Groups[2].Value, runCtx);
                 var resolved = htmlEncodeSubstitution ? HtmlEncodeValue(raw) : raw;
                 return escapeBracesInSubstitution ? EscapeBracesForParser(resolved) : resolved;
             });
@@ -5393,7 +5450,7 @@ namespace TrueReplayer.Services
         {
             if (string.IsNullOrEmpty(text)) return text;
             text = await ResolveClipboardTokensAsync(text, dispatcherQueue, clipboardOverride, escapeBracesInSubstitution, htmlEncodeSubstitution, runCtx, flavorSync);
-            text = await ResolveWinClipTokensAsync(text, dispatcherQueue, escapeBracesInSubstitution, htmlEncodeSubstitution, flavorSync);
+            text = await ResolveWinClipTokensAsync(text, dispatcherQueue, escapeBracesInSubstitution, htmlEncodeSubstitution, flavorSync, runCtx);
             text = ResolveDateTimeTokens(text, flavorSync);
             text = ResolveRandomTokens(text, flavorSync);
             // {input:Label} runs BEFORE run-state so a {var:Label} in the same text sees the answer
@@ -5507,8 +5564,10 @@ namespace TrueReplayer.Services
 
         // Matches {var:name} — letters/digits/underscore, case-insensitive (mirrors
         // VariableNameRegex; lookup lowercases the captured name).
+        // {var:name} / {var:name:mods} — the modifier tail is unambiguous because a variable name
+        // is [A-Za-z0-9_]+, so the first ':' after the name can only start a chain.
         private static readonly Regex VarTokenRegex = new(
-            @"\{var:([A-Za-z0-9_]+)\}",
+            @"\{var:([A-Za-z0-9_]+)(?::([^}]+))?\}",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         // Data-loop column token {row:column} / {row:column:mods}. Disjoint from the bare
@@ -5533,8 +5592,9 @@ namespace TrueReplayer.Services
         // Clipboard-slot token {clip:name}. Disjoint from {clipboard...}: this regex requires
         // ':' immediately after "clip", which "{clipboard}" / "{clipboard:mods}" never has
         // (their 5th char is 'b'). Lookup lowercases the captured name, same as {var}.
+        // {clip:name} / {clip:name:mods} — same unambiguous shape as {var:}.
         private static readonly Regex ClipSlotTokenRegex = new(
-            @"\{clip:([A-Za-z0-9_]+)\}",
+            @"\{clip:([A-Za-z0-9_]+)(?::([^}]+))?\}",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         /// <summary>
@@ -5558,6 +5618,11 @@ namespace TrueReplayer.Services
                     string value = string.Empty;
                     runCtx.Variables?.TryGetValue(name, out value!);
                     value ??= string.Empty;
+                    // Optional modifier chain ({var:nome:trim:upper}) — the SAME shared pipeline
+                    // {row:col:mods} uses, applied to the raw value before the html-encode and
+                    // brace-escape for the target context.
+                    if (m.Groups[2].Success)
+                        value = ApplyClipboardModifiers(value, m.Groups[2].Value, runCtx);
                     if (htmlEncodeSubstitution) value = HtmlEncodeValue(value);
                     return escapeBracesInSubstitution ? EscapeBracesForParser(value) : value;
                 });
@@ -5595,6 +5660,8 @@ namespace TrueReplayer.Services
                     string value = string.Empty;
                     runCtx.ClipSlots?.TryGetValue(name, out value!);
                     value ??= string.Empty;
+                    if (m.Groups[2].Success)
+                        value = ApplyClipboardModifiers(value, m.Groups[2].Value, runCtx);
                     if (htmlEncodeSubstitution) value = HtmlEncodeValue(value);
                     return escapeBracesInSubstitution ? EscapeBracesForParser(value) : value;
                 });

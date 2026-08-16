@@ -519,6 +519,42 @@ export function parseRowToken(token: string): { column: string; state: Transform
   return { column, state: assertRebuildable(state, token, buildRowToken(column, state)) };
 }
 
+// {var:name[:mods]} and {clip:name[:mods]} — the same modifier tail as the row tokens, on a head
+// whose first argument is a user-chosen NAME. No mods → plain {var:name}, byte-identical to what
+// NamePromptPopover inserts.
+export function buildNameToken(head: 'var' | 'clip', name: string, s: TransformState): string {
+  return '{' + [head, name, ...buildModifierParts(s)].join(':') + '}';
+}
+
+export function parseNameToken(token: string, head: 'var' | 'clip'): { name: string; state: TransformState } {
+  const re = head === 'var' ? /^\{var:/i : /^\{clip:/i;
+  if (!re.test(token)) return { name: '', state: { ...DEFAULT_TRANSFORM } };
+  const parts = token.slice(1, -1).split(':');
+  const name = parts[1] ?? '';
+  const state = parseModifierParts(parts, 2);
+  return { name, state: assertRebuildable(state, token, buildNameToken(head, name, state)) };
+}
+
+// {winclip[:N][:mods]} — item N of the Windows clipboard history. The index is optional and
+// DIGITS ONLY, which is exactly what keeps {winclip:trim} unambiguous on both sides. The builder
+// always writes the index, so the two never have to be told apart by position.
+export function buildWinClipToken(index: number, s: TransformState): string {
+  return '{' + ['winclip', String(index), ...buildModifierParts(s)].join(':') + '}';
+}
+
+export function parseWinClipToken(token: string): { index: number; state: TransformState } {
+  if (!/^\{winclip(?::|\})/i.test(token)) return { index: 1, state: { ...DEFAULT_TRANSFORM } };
+  const parts = token.slice(1, -1).split(':');
+  const hasIndex = parts[1] !== undefined && /^\d+$/.test(parts[1]);
+  const index = hasIndex ? Math.max(1, Number(parts[1])) : 1;
+  const state = parseModifierParts(parts, hasIndex ? 2 : 1);
+  // Compare against the token with the index made EXPLICIT. A bare {winclip} means index 1, so
+  // rebuilding it as {winclip:1} loses nothing — comparing against the bare form instead would
+  // flag every plain history chip as unrebuildable and freeze its editor.
+  const normalised = '{' + ['winclip', String(index), ...parts.slice(hasIndex ? 2 : 1)].join(':') + '}';
+  return { index, state: assertRebuildable(state, normalised, buildWinClipToken(index, state)) };
+}
+
 // Reverse of buildRowNextToken — {rownext:column[:mods]} → column name (verbatim) + modifier state.
 export function parseRowNextToken(token: string): { column: string; state: TransformState } {
   if (!/^\{rownext:/i.test(token)) return { column: '', state: { ...DEFAULT_TRANSFORM } };

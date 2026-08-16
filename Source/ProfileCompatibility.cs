@@ -177,6 +177,28 @@ namespace TrueReplayer.Services
             (p => p.Actions.Any(UsesTokenArgument),
                 new Version(2, 9, 10), "Reference modifier argument"),
 
+            // Clipboard list modifiers (range/lines/sort/dedupe/reverse/join) — shipped in 2.8.0
+            // and never pinned, which was an omission rather than a decision: they degrade through
+            // the SAME silent unknown-modifier default as {clipboard:next} above, so a 2.7.x build
+            // pastes the whole unsorted, un-ranged content and looks like it worked. Pinned at the
+            // version that introduced them, so no profile that already uses them changes meaning.
+            (p => p.Actions.Any(UsesListModifier),
+                new Version(2, 8, 0), "Clipboard list modifiers"),
+
+            // Text-slice modifiers ({clipboard:words:6-}, {clipboard:after: - } and the rest of the
+            // split family), plus an open-ended span on range ("range:6-", which an older parser
+            // refuses outright, leaving `range` inert). Same silent class again: the author asked
+            // for a fragment and an older build pastes everything. Introduced in 2.20.0.
+            (p => p.Actions.Any(UsesSliceModifier),
+                new Version(2, 20, 0), "Text-slice modifiers"),
+
+            // A modifier chain on {clip:name} / {var:name} / {winclip:N}. Those heads carried no
+            // chain before 2.20.0, so an older build's regex does not match the token at all and
+            // types it out verbatim — the literal-token failure class of the winclip and
+            // modified-row pins above, not the silent one.
+            (p => p.Actions.Any(UsesChainOnNameToken),
+                new Version(2, 20, 0), "Modifiers on slot/variable/history tokens"),
+
             // Desktop Assert — the worst possible degradation, which is exactly why it is pinned.
             // An older build has no "Assert" switch case, so the row is silently SKIPPED: the
             // guard the author added ("this window MUST be focused before I type a password")
@@ -528,12 +550,29 @@ namespace TrueReplayer.Services
             return false;
         }
 
-        // ── Reference arguments ("line:@i") ─────────────────────────────────────────────────
-        // Same three heads the shared applier serves. {clip:name} is NOT here: its regex carries
-        // no modifier chain at all, so there is nothing to reference into.
+        // ── Modifier chains, wherever they can appear ───────────────────────────────────────
+        // Every token head the shared applier serves. Groups 1-4 are the chains of {clipboard},
+        // {row|rownext:col}, {var|clip:name} and {winclip[:N]}; at most one is set per match.
+        // The last two joined the list when those heads gained a chain — a pin that only knew the
+        // first two would miss "{clip:pedido:line:@i}" entirely.
         private static readonly Regex ModifierChainHeadRegex = new(
-            @"\{(?:clipboard(?::([^}]*))?|(?:row|rownext):[A-Za-z0-9_]+(?::([^}]*))?)\}",
+            @"\{(?:clipboard(?::([^}]*))?|(?:row|rownext):[A-Za-z0-9_]+(?::([^}]*))?|(?:var|clip):[A-Za-z0-9_]+(?::([^}]*))?|winclip(?::\d+)?(?::([^}]*))?)\}",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        // The chain of every chain-bearing token in `text`, so each detector below states WHICH
+        // question it asks and none of them repeats the group-picking.
+        private static IEnumerable<string?> ModifierChainsIn(string text)
+        {
+            foreach (Match m in ModifierChainHeadRegex.Matches(text))
+            {
+                for (int g = 1; g <= 4; g++)
+                {
+                    if (!m.Groups[g].Success) continue;
+                    yield return m.Groups[g].Value;
+                    break;
+                }
+            }
+        }
 
         private static bool UsesTokenArgument(ActionItem a) =>
             (KeyResolvingActionTypes.Contains(a.ActionType) && ContainsTokenArgument(a.Key)) ||
@@ -550,18 +589,81 @@ namespace TrueReplayer.Services
         {
             // Cheap reject first: no sigil anywhere means no reference anywhere.
             if (string.IsNullOrEmpty(text) || text.IndexOf('@') < 0) return false;
-            foreach (Match m in ModifierChainHeadRegex.Matches(text))
-            {
-                var chain = m.Groups[1].Success ? m.Groups[1].Value
-                          : m.Groups[2].Success ? m.Groups[2].Value : null;
-                // Delegate to the ENGINE's own walk rather than re-deciding here — the same
-                // one-source-of-truth rule the {clipboard:next} pin above follows, and for the
-                // same reason: a hand-written mirror drifts on chains like {clipboard:join:@x}
-                // (a join separator that merely looks like a reference and must NOT pin).
+            // Delegate to the ENGINE's own walk rather than re-deciding here — the same
+            // one-source-of-truth rule the {clipboard:next} pin above follows, and for the
+            // same reason: a hand-written mirror drifts on chains like {clipboard:join:@x}
+            // (a join separator that merely looks like a reference and must NOT pin).
+            foreach (var chain in ModifierChainsIn(text))
                 if (ActionReplayer.ChainUsesTokenArg(chain)) return true;
-            }
             return false;
         }
+
+        // ── Text-slice modifiers (words / before / after / *last, and open-ended spans) ──────
+        private static bool UsesSliceModifier(ActionItem a) =>
+            (KeyResolvingActionTypes.Contains(a.ActionType) && ContainsSliceModifier(a.Key)) ||
+            ContainsSliceModifier(a.KeyHtml) ||
+            ContainsSliceModifier(a.KeyMarkdown) ||
+            (BrowserTextResolvingActionTypes.Contains(a.ActionType) && ContainsSliceModifier(a.BrowserText)) ||
+            ContainsSliceModifier(a.VariableValue) ||
+            ContainsSliceModifier(a.ConditionOperand) ||
+            ContainsSliceModifier(a.FilePath) ||
+            ContainsSliceModifier(a.LaunchPath) ||
+            ContainsSliceModifier(a.LaunchArgs);
+
+        private static bool ContainsSliceModifier(string? text)
+        {
+            if (string.IsNullOrEmpty(text) || text.IndexOf('{') < 0) return false;
+            foreach (var chain in ModifierChainsIn(text))
+                if (ActionReplayer.ChainUsesSliceModifier(chain)) return true;
+            return false;
+        }
+
+        // ── The list modifiers, which shipped in 2.8.0 and were never pinned ────────────────
+        private static bool UsesListModifier(ActionItem a) =>
+            (KeyResolvingActionTypes.Contains(a.ActionType) && ContainsListModifier(a.Key)) ||
+            ContainsListModifier(a.KeyHtml) ||
+            ContainsListModifier(a.KeyMarkdown) ||
+            (BrowserTextResolvingActionTypes.Contains(a.ActionType) && ContainsListModifier(a.BrowserText)) ||
+            ContainsListModifier(a.VariableValue) ||
+            ContainsListModifier(a.ConditionOperand) ||
+            ContainsListModifier(a.FilePath) ||
+            ContainsListModifier(a.LaunchPath) ||
+            ContainsListModifier(a.LaunchArgs);
+
+        private static bool ContainsListModifier(string? text)
+        {
+            if (string.IsNullOrEmpty(text) || text.IndexOf('{') < 0) return false;
+            foreach (var chain in ModifierChainsIn(text))
+                if (ActionReplayer.ChainUsesListModifier(chain)) return true;
+            return false;
+        }
+
+        // ── A modifier chain on a slot / variable / history token ───────────────────────────
+        // A DIFFERENT question from the two above: those ask which modifiers a chain uses, this
+        // asks whether one of these three heads carries a chain at all. An older build's regex for
+        // them ends right after the name, so the whole token fails to match and is typed out
+        // literally — visibly broken rather than silently permissive, but still worth a pin.
+        //
+        // The winclip half is spelled as two alternatives on purpose: "\{winclip(?::\d+)?:[^}]+\}"
+        // backtracks the optional index away and matches a plain {winclip:2}, which carries no
+        // chain at all and must not pin.
+        private static readonly Regex ChainOnNameTokenRegex = new(
+            @"\{(?:var|clip):[A-Za-z0-9_]+:[^}]+\}|\{winclip:\d+:[^}]+\}|\{winclip:(?!\d+\})[^}]+\}",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        private static bool UsesChainOnNameToken(ActionItem a) =>
+            (KeyResolvingActionTypes.Contains(a.ActionType) && ContainsChainOnNameToken(a.Key)) ||
+            ContainsChainOnNameToken(a.KeyHtml) ||
+            ContainsChainOnNameToken(a.KeyMarkdown) ||
+            (BrowserTextResolvingActionTypes.Contains(a.ActionType) && ContainsChainOnNameToken(a.BrowserText)) ||
+            ContainsChainOnNameToken(a.VariableValue) ||
+            ContainsChainOnNameToken(a.ConditionOperand) ||
+            ContainsChainOnNameToken(a.FilePath) ||
+            ContainsChainOnNameToken(a.LaunchPath) ||
+            ContainsChainOnNameToken(a.LaunchArgs);
+
+        private static bool ContainsChainOnNameToken(string? text) =>
+            !string.IsNullOrEmpty(text) && text.IndexOf('{') >= 0 && ChainOnNameTokenRegex.IsMatch(text);
 
         /// <summary>
         /// Walks the feature matrix and returns the highest minimum version among all
