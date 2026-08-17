@@ -154,7 +154,9 @@ export function ClipboardSurface({ state, onStateChange, head, onHeadChange, onB
       }
       case 'winclip':
         // The Windows clipboard history lives in the engine only — nothing to preview against.
-        return { raw: '', ready: true, unknown: true, label: 'History item' };
+        // Labelled "Item text", not "History item": that name already belongs to the field above
+        // that picks WHICH item, and the same words over both boxes read as one repeated thing.
+        return { raw: '', ready: true, unknown: true, label: 'Item text' };
     }
   }, [head, clipRaw, clipReady, dataTable, runState, tt]);
 
