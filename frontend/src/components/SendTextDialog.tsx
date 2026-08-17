@@ -17,9 +17,11 @@ import {
 import type { ClipboardChipEditRequest } from './lexical/TokenChip';
 import { ClipboardSurface } from './lexical/ClipboardSurface';
 import {
-  buildClipboardToken,
-  parseClipboardToken,
+  buildChainToken,
+  parseChainToken,
+  chainHeadIsUsable,
   DEFAULT_TRANSFORM,
+  type ChainHead,
   type TransformState,
 } from './lexical/clipboardModifiers';
 import { uiZoom, rectToLayout, viewportInLayout } from '../utils/zoomSpace';
@@ -396,6 +398,9 @@ export function SendTextDialog({ mode, initialText = '', initialHtml = null, ini
   // DialogShell footer (swapped while the surface is open) can build the token.
   const [surface, setSurface] = useState<SurfaceSession | null>(null);
   const [clipState, setClipState] = useState<TransformState>(DEFAULT_TRANSFORM);
+  // Which token the chain belongs to. Insert always starts on {clipboard}; a chip edit adopts
+  // whatever the chip is, so one surface serves all six heads.
+  const [clipHead, setClipHead] = useState<ChainHead>({ kind: 'clipboard' });
   // Dirty flag — Apply only commits real edits: parse→build round-trips are NOT
   // byte-identical for hand-typed edge cases, so open+Apply must not rewrite.
   const [clipDirty, setClipDirty] = useState(false);
@@ -425,14 +430,19 @@ export function SendTextDialog({ mode, initialText = '', initialHtml = null, ini
   // ── Clipboard Surface session ──
   const openInsertSurface = useCallback(() => {
     setClipState(DEFAULT_TRANSFORM); // fresh every time, as the old popover did
+    setClipHead({ kind: 'clipboard' });
     setClipDirty(false);
     setSurface({ mode: 'insert' });
   }, []);
 
   // Chip click → edit session (routed here by ClipboardChipEditContext; the
-  // SheetPanel consumer has no provider and keeps the legacy popover).
+  // SheetPanel consumer has no provider and keeps the legacy popover). The chip may be any of
+  // the six chain-bearing heads, so the session adopts the token's head as well as its chain.
   const handleClipboardChipEdit = useCallback((req: ClipboardChipEditRequest) => {
-    setClipState(parseClipboardToken(req.token));
+    const parsed = parseChainToken(req.token);
+    if (!parsed) return;   // routing already refused non-chain chips; belt and braces
+    setClipState(parsed.state);
+    setClipHead(parsed.head);
     setClipDirty(false);
     setSurface({ mode: 'edit', token: req.token, commit: req.commit, remove: req.remove });
   }, []);
@@ -445,7 +455,10 @@ export function SendTextDialog({ mode, initialText = '', initialHtml = null, ini
   const handleSurfaceConfirm = useCallback(() => {
     setSurface((cur) => {
       if (!cur) return cur;
-      const token = buildClipboardToken(clipState);
+      // An empty column/slot/variable name would build a broken token ({clip:}), so the same
+      // rule the popover editors follow applies here: refuse to write it.
+      if (!chainHeadIsUsable(clipHead)) return cur;
+      const token = buildChainToken(clipHead, clipState);
       if (cur.mode === 'insert') {
         // insertToken (not insertText): a surface-built token always becomes a
         // chip even when its join separator defeats the typing grammar.
@@ -459,10 +472,14 @@ export function SendTextDialog({ mode, initialText = '', initialHtml = null, ini
       return null;
     });
     lexicalApiRef.current?.focus();
-  }, [clipState, clipDirty]);
+  }, [clipState, clipHead, clipDirty]);
 
   const handleSurfaceReset = useCallback(() => {
-    setClipState(surface?.mode === 'edit' ? parseClipboardToken(surface.token) : DEFAULT_TRANSFORM);
+    const parsed = surface?.mode === 'edit' ? parseChainToken(surface.token) : null;
+    setClipState(parsed ? parsed.state : DEFAULT_TRANSFORM);
+    // The head resets too — a renamed slot is an edit like any other, and leaving it behind
+    // would make Reset restore the chain onto the WRONG token.
+    setClipHead(parsed ? parsed.head : { kind: 'clipboard' });
     setClipDirty(false); // back to the session's starting point = nothing to apply
   }, [surface]);
 
@@ -961,6 +978,11 @@ export function SendTextDialog({ mode, initialText = '', initialHtml = null, ini
             state={clipState}
             onStateChange={(updater) => {
               setClipState(updater);
+              setClipDirty(true);
+            }}
+            head={clipHead}
+            onHeadChange={(next) => {
+              setClipHead(next);
               setClipDirty(true);
             }}
             onBack={closeSurface}

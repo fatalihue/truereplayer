@@ -3,11 +3,12 @@ import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext
 import { $getNodeByKey, type NodeKey } from 'lexical';
 import { TokenNode } from './TokenNode';
 import { TokenChipPopover } from './TokenChipPopover';
+import { chainHeadKind } from './clipboardModifiers';
 
-// Host-provided handler for editing a {clipboard...} chip in a LARGER surface
-// than the default 300px popover. SendTextDialog provides one (routing to its
-// full-body Clipboard Surface); SheetPanel doesn't — chips there fall back to
-// the popover, byte-identical to the old behavior. Defined here (not in
+// Host-provided handler for editing a chain-bearing chip ({clipboard}, {row:col}, {rownext:col},
+// {var:name}, {clip:name}, {winclip:N}) in a LARGER surface than the default 300px popover.
+// SendTextDialog provides one (routing to its full-body chain builder); SheetPanel doesn't —
+// chips there fall back to the popover, byte-identical to the old behavior. Defined here (not in
 // LexicalTokenEditor) so the provider module can import it without a cycle.
 export interface ClipboardChipEditRequest {
   /** The chip's current token text, e.g. `{Clipboard:trim:upper}`. */
@@ -69,11 +70,13 @@ export function TokenChip({ nodeKey, token }: { nodeKey: NodeKey; token: string 
 
   const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    // Clipboard chips route to the host's large edit surface when one is
-    // provided (Insert Text dialog); otherwise (SheetPanel) the popover below
-    // opens exactly as before. Do NOT remove this dispatch as "dead" — the
+    // EVERY chain-bearing chip routes to the host's large edit surface when one is provided
+    // (Insert Text dialog); otherwise (SheetPanel, which provides none) the popover below opens
+    // exactly as before. It used to be {clipboard} alone, which made that one token the only
+    // chip with a real builder while {row:}, {clip:}, {var:} and {winclip:} — carrying the very
+    // same modifier chain — were stuck in 300px. Do NOT remove this dispatch as "dead": the
     // provider lives in a different tree (SendTextDialog via context).
-    if (onClipboardChipEdit && /^\{clipboard(?::|\})/i.test(token)) {
+    if (onClipboardChipEdit && chainHeadKind(token) !== null) {
       onClipboardChipEdit({
         token,
         commit: (next: string) => {

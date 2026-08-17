@@ -555,6 +555,85 @@ export function parseWinClipToken(token: string): { index: number; state: Transf
   return { index, state: assertRebuildable(state, normalised, buildWinClipToken(index, state)) };
 }
 
+// ── The chain-bearing heads, as one dispatch ─────────────────────────────────────────────────
+//
+// Six token shapes now carry the SAME modifier tail. Every surface that edits one needs the same
+// three answers — is this a chain token, what is its identity, how do I write it back — and each
+// of them getting its own copy of the head list is how the routing and the editor drift apart.
+// `head` holds the part that is NOT the chain: a column, a name, a history index.
+export type ChainHead =
+  | { kind: 'clipboard' }
+  | { kind: 'row'; column: string }
+  | { kind: 'rownext'; column: string }
+  | { kind: 'var'; name: string }
+  | { kind: 'clip'; name: string }
+  | { kind: 'winclip'; index: number };
+
+export type ChainHeadKind = ChainHead['kind'];
+
+/** The head kind of a chain-bearing token, or null for anything else ({enter}, {date}, …). */
+export function chainHeadKind(token: string): ChainHeadKind | null {
+  if (token.length < 3 || token[0] !== '{' || token[token.length - 1] !== '}') return null;
+  const inner = token.slice(1, -1);
+  const name = inner.split(':')[0].toLowerCase();
+  switch (name) {
+    case 'clipboard': return 'clipboard';
+    // A bare {row} is the action-row counter, not a data cell — only {row:column} takes a chain.
+    case 'row': return inner.includes(':') ? 'row' : null;
+    case 'rownext': return 'rownext';
+    case 'var': return 'var';
+    case 'clip': return 'clip';
+    case 'winclip': return 'winclip';
+    default: return null;
+  }
+}
+
+export function parseChainToken(token: string): { head: ChainHead; state: TransformState } | null {
+  const kind = chainHeadKind(token);
+  if (kind === null) return null;
+  switch (kind) {
+    case 'clipboard':
+      return { head: { kind }, state: parseClipboardToken(token) };
+    case 'row': {
+      const r = parseRowToken(token);
+      return { head: { kind, column: r.column }, state: r.state };
+    }
+    case 'rownext': {
+      const r = parseRowNextToken(token);
+      return { head: { kind, column: r.column }, state: r.state };
+    }
+    case 'var':
+    case 'clip': {
+      const r = parseNameToken(token, kind);
+      return { head: { kind, name: r.name }, state: r.state };
+    }
+    case 'winclip': {
+      const r = parseWinClipToken(token);
+      return { head: { kind, index: r.index }, state: r.state };
+    }
+  }
+}
+
+export function buildChainToken(head: ChainHead, s: TransformState): string {
+  switch (head.kind) {
+    case 'clipboard': return buildClipboardToken(s);
+    case 'row': return buildRowToken(head.column, s);
+    case 'rownext': return buildRowNextToken(head.column, s);
+    case 'var': return buildNameToken('var', head.name, s);
+    case 'clip': return buildNameToken('clip', head.name, s);
+    case 'winclip': return buildWinClipToken(head.index, s);
+  }
+}
+
+/** Whether the head's identity is filled in — an empty column or name would build a broken token. */
+export function chainHeadIsUsable(head: ChainHead): boolean {
+  switch (head.kind) {
+    case 'row': case 'rownext': return head.column.length > 0;
+    case 'var': case 'clip': return head.name.length > 0;
+    default: return true;
+  }
+}
+
 // Reverse of buildRowNextToken — {rownext:column[:mods]} → column name (verbatim) + modifier state.
 export function parseRowNextToken(token: string): { column: string; state: TransformState } {
   if (!/^\{rownext:/i.test(token)) return { column: '', state: { ...DEFAULT_TRANSFORM } };
