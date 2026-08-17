@@ -15,8 +15,34 @@ namespace TrueReplayer.Services
         private const string RepoName = "TrueReplayer-releases";
         private const string RepoUrl = "https://github.com/" + RepoOwner + "/" + RepoName;
 
+        /// <summary>
+        /// The release feed, read as a STATIC FILE off the latest release rather than through the
+        /// GitHub REST API.
+        ///
+        /// <para>GithubSource discovers releases by calling <c>GET /repos/{owner}/{repo}/releases</c>.
+        /// On 2026-08-17 that endpoint began answering <c>200</c> with an EMPTY ARRAY for this
+        /// repository — for anonymous and authenticated callers alike — while its own <c>Link</c>
+        /// header advertised five pages of results. Everything else about the repo was healthy:
+        /// <c>/releases/latest</c>, <c>/releases/tags/{tag}</c> and the GraphQL feed behind
+        /// <c>gh release list</c> all returned the releases, and the identical list call against an
+        /// unrelated public repo worked. So the app saw "no releases at all" and offered no update,
+        /// for every user, with nothing in the log but a successful check.</para>
+        ///
+        /// <para>A retry cannot fix that: an empty list is a SUCCESSFUL response, so every attempt
+        /// returns the same nothing. The fix is to stop asking the index a question we can answer
+        /// with a file. <c>releases/latest/download/{name}</c> is a permanent GitHub redirect into
+        /// the newest release's assets, so one GET of a 759-byte JSON replaces the whole API
+        /// round-trip — and it costs no rate limit, which the anonymous 60/hour budget made a real
+        /// constraint for an app that checks on every launch.</para>
+        ///
+        /// <para>This depends on the release procedure always publishing with <c>--latest</c>, which
+        /// it does. RepoUrl stays in use for the release-notes fetch, which reads
+        /// <c>/releases/tags/{tag}</c> — a different endpoint, and one that never broke.</para>
+        /// </summary>
+        private const string ReleaseFeedUrl = RepoUrl + "/releases/latest/download";
+
         private static readonly UpdateManager _manager = new(
-            new GithubSource(RepoUrl, null, false));
+            new SimpleWebSource(ReleaseFeedUrl));
 
         private static readonly HttpClient _http = CreateHttpClient();
 
@@ -49,36 +75,55 @@ namespace TrueReplayer.Services
         // the manual "Check for Updates" responsive and stops a wedged background task lingering.
         private static readonly TimeSpan CheckTimeout = TimeSpan.FromSeconds(10);
 
+        // One retry, and only after a THROWN failure. The check runs once per launch with no timer
+        // and no poll behind it (see the note in WebViewBridge), so a single 504 from the release
+        // host used to cost the whole session — and the minutes right after a release, when an
+        // update actually exists, are exactly when that host is most likely to hiccup.
+        //
+        // A TIMEOUT deliberately does not retry. CheckForUpdatesAsync takes no CancellationToken,
+        // so a timed-out attempt is still in flight; starting a second would stack two
+        // uncancellable calls against the same host rather than replace one.
+        private const int CheckAttempts = 2;
+        private static readonly TimeSpan RetryDelay = TimeSpan.FromSeconds(3);
+
         public static async Task<string?> CheckForUpdateAsync()
         {
             if (!_manager.IsInstalled)
                 return null;
 
-            try
+            for (int attempt = 1; ; attempt++)
             {
-                using var timeoutCts = new CancellationTokenSource();
-                var checkTask = _manager.CheckForUpdatesAsync();
-                var timeoutTask = Task.Delay(CheckTimeout, timeoutCts.Token);
-                if (await Task.WhenAny(checkTask, timeoutTask) != checkTask)
+                try
                 {
-                    // Velopack's CheckForUpdatesAsync exposes no CancellationToken overload, so the
-                    // GitHub round-trip can't be aborted — but observe its eventual outcome so a late
-                    // fault doesn't bubble up as a noisy UnobservedTaskException.
-                    _ = checkTask.ContinueWith(
-                        t => DiagnosticLog.Warn(
-                            $"[UpdateService] Update check finished after timeout: {t.Exception?.GetBaseException().Message ?? "completed"}"),
-                        TaskScheduler.Default);
-                    DiagnosticLog.Warn("[UpdateService] Update check timed out — release server slow/unreachable; treating as up-to-date this run");
+                    using var timeoutCts = new CancellationTokenSource();
+                    var checkTask = _manager.CheckForUpdatesAsync();
+                    var timeoutTask = Task.Delay(CheckTimeout, timeoutCts.Token);
+                    if (await Task.WhenAny(checkTask, timeoutTask) != checkTask)
+                    {
+                        // Velopack's CheckForUpdatesAsync exposes no CancellationToken overload, so the
+                        // round-trip can't be aborted — but observe its eventual outcome so a late
+                        // fault doesn't bubble up as a noisy UnobservedTaskException.
+                        _ = checkTask.ContinueWith(
+                            t => DiagnosticLog.Warn(
+                                $"[UpdateService] Update check finished after timeout: {t.Exception?.GetBaseException().Message ?? "completed"}"),
+                            TaskScheduler.Default);
+                        DiagnosticLog.Warn("[UpdateService] Update check timed out — release server slow/unreachable; treating as up-to-date this run");
+                        return null;
+                    }
+                    timeoutCts.Cancel(); // check won the race — stop the pending Task.Delay timer
+                    _pendingUpdate = await checkTask; // already completed
+                    return _pendingUpdate?.TargetFullRelease?.Version?.ToString();
+                }
+                catch (Exception ex) when (attempt < CheckAttempts)
+                {
+                    DiagnosticLog.Warn($"[UpdateService] Check attempt {attempt} failed ({ex.Message}) — retrying in {RetryDelay.TotalSeconds:0}s");
+                    await Task.Delay(RetryDelay).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    DiagnosticLog.Warn($"[UpdateService] Check failed after {attempt} attempt(s): {ex.Message}");
                     return null;
                 }
-                timeoutCts.Cancel(); // check won the race — stop the pending Task.Delay timer
-                _pendingUpdate = await checkTask; // already completed
-                return _pendingUpdate?.TargetFullRelease?.Version?.ToString();
-            }
-            catch (Exception ex)
-            {
-                DiagnosticLog.Warn($"[UpdateService] Check failed: {ex.Message}");
-                return null;
             }
         }
 
