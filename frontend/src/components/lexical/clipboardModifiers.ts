@@ -95,9 +95,37 @@ function parseSpanState(s: string | undefined): { from: number | null; to: numbe
   return { from, to };
 }
 
-/** Serializes a span back to "a-b", with an omitted side for an open end. null = emit nothing. */
-const spanText = (from: number | null, to: number | null): string | null =>
-  from === null && to === null ? null : `${from ?? ''}-${to ?? ''}`;
+/**
+ * The bounds as the RUN will actually see them, or null when the step is not emitted at all.
+ *
+ * One function so the token, the preview and the step badge can never disagree about a span —
+ * they used to. `words:4-1` was emitted verbatim, the backend swapped it (TryParseSpan does) and
+ * pasted words 1..4, while the preview ran sliceWords(4, 1) and showed EMPTY. A preview that says
+ * "nothing" about a token that pastes a sentence is the worst kind of wrong, and it was reachable
+ * by clicking: type 4 in the first field, 1 in the second.
+ */
+function effectiveSpan(from: number | null, to: number | null): { from: number; to: number } | null {
+  if (from === null && to === null) return null;
+  let a = from ?? 1;
+  let b = to ?? Number.POSITIVE_INFINITY;
+  if (a > b) [a, b] = [b, a];
+  return { from: a, to: b };
+}
+
+/**
+ * Serializes a span back to "a-b", with an omitted side for an open end. null = emit nothing,
+ * which is what BOTH ends open means: a bare "-" carries no bound, the backend would not consume
+ * it, and the step would sit inert — so there is nothing honest to write.
+ *
+ * Reversed bounds are emitted ALREADY SWAPPED. They mean the same thing to the engine either way,
+ * but "4-1" did not round-trip: the parser swapped it, the rebuild came out "1-4", and
+ * assertRebuildable froze the chip read-only the next time it was opened.
+ */
+function spanText(from: number | null, to: number | null): string | null {
+  if (from === null && to === null) return null;
+  if (from !== null && to !== null && from > to) [from, to] = [to, from];
+  return `${from ?? ''}-${to ?? ''}`;
+}
 
 type ArgKind = 'none' | 'raw' | 'count1' | 'count0' | 'span' | 'indices';
 
@@ -392,12 +420,14 @@ export function applyTransformPreview(raw: string, s: TransformState): string {
     if (at < 0) r = '';
     else r = s.split === 'before' ? r.slice(0, at) : r.slice(at + s.splitDelim.length);
   }
-  if (s.listPick === 'range') {
+  // null = the builder emits no `range` at all (both ends open), so the preview must skip the
+  // step too — it used to run it, and silently reported CRLF-normalised text for a token that
+  // does not touch the content.
+  const rangeSpan = s.listPick === 'range' ? effectiveSpan(s.rangeFrom, s.rangeTo) : null;
+  if (rangeSpan) {
     const lines = splitLines(r);
-    let a = s.rangeFrom ?? 1, b = s.rangeTo ?? Number.POSITIVE_INFINITY;
-    if (a > b) [a, b] = [b, a];
-    const from = Math.max(1, a);
-    const to = Math.min(lines.length, b);
+    const from = Math.max(1, rangeSpan.from);
+    const to = Math.min(lines.length, rangeSpan.to);
     r = from <= to ? lines.slice(from - 1, to).join('\n') : '';
   } else if (s.listPick === 'lines' && /\d/.test(s.linesSpec)) {
     const lines = splitLines(r);
@@ -433,8 +463,11 @@ export function applyTransformPreview(raw: string, s: TransformState): string {
   if (s.join) r = splitLines(r).join(s.joinSep);
   // An unfinished reference emits the NUMBER (see buildModifierParts), so previewing the number
   // is the honest thing — it is literally what the token beside this preview says.
-  if (s.extract === 'words') {
-    r = sliceWords(r, s.wordsFrom ?? 1, s.wordsTo ?? Number.POSITIVE_INFINITY);
+  // Same rule as the range span above: bounds exactly as the emitted token carries them, and no
+  // step at all when the token carries none.
+  const wordSpan = s.extract === 'words' ? effectiveSpan(s.wordsFrom, s.wordsTo) : null;
+  if (wordSpan) {
+    r = sliceWords(r, wordSpan.from, wordSpan.to);
   } else if (s.extract === 'line') {
     const lines = splitLines(r);
     r = lines[s.extractN - 1] ?? '';
@@ -551,7 +584,14 @@ export function parseWinClipToken(token: string): { index: number; state: Transf
   // Compare against the token with the index made EXPLICIT. A bare {winclip} means index 1, so
   // rebuilding it as {winclip:1} loses nothing — comparing against the bare form instead would
   // flag every plain history chip as unrebuildable and freeze its editor.
-  const normalised = '{' + ['winclip', String(index), ...parts.slice(hasIndex ? 2 : 1)].join(':') + '}';
+  //
+  // The index goes in RAW, not clamped. Folding the clamp in here made assertRebuildable compare
+  // {winclip:1} against {winclip:1} and wave through a rewrite of {winclip:0} — which the engine
+  // resolves to NOTHING (its gate is n >= 1) — into {winclip:1}, which pastes the last thing
+  // copied. Silently swapping "paste nothing" for "paste the clipboard" is exactly what this
+  // guard exists to stop, so an out-of-range index goes read-only instead.
+  const rawIndex = hasIndex ? parts[1] : '1';
+  const normalised = '{' + ['winclip', rawIndex, ...parts.slice(hasIndex ? 2 : 1)].join(':') + '}';
   return { index, state: assertRebuildable(state, normalised, buildWinClipToken(index, state)) };
 }
 
@@ -578,11 +618,16 @@ export function chainHeadKind(token: string): ChainHeadKind | null {
   const name = inner.split(':')[0].toLowerCase();
   switch (name) {
     case 'clipboard': return 'clipboard';
-    // A bare {row} is the action-row counter, not a data cell — only {row:column} takes a chain.
-    case 'row': return inner.includes(':') ? 'row' : null;
-    case 'rownext': return 'rownext';
-    case 'var': return 'var';
-    case 'clip': return 'clip';
+    // These four need their argument to be a token at all: the engine's regexes all require
+    // ':name' / ':column', so a bare {var} or {clip} resolves to nothing and there is no identity
+    // for the builder to edit. Routing them to it opened a surface whose Token box read "{var:}"
+    // and whose Apply button did nothing — a dead end. They fall through to the popover, which
+    // has a name field to fill in. (A bare {row} is the action-row counter, a different token.)
+    case 'row':
+    case 'rownext':
+    case 'var':
+    case 'clip':
+      return inner.includes(':') ? name as ChainHeadKind : null;
     case 'winclip': return 'winclip';
     default: return null;
   }

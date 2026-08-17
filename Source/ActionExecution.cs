@@ -5257,8 +5257,9 @@ namespace TrueReplayer.Services
                 // ApplyClipboardModifiers because it is the only STATEFUL modifier: that method is
                 // static and shared verbatim by {row:col:mods} and {rownext:col:mods}, which have
                 // no cursor of their own here and must keep resolving identically.
-                // (NOT {clip:name}: ClipSlotTokenRegex is \{clip:([A-Za-z0-9_]+)\} — a slot token
-                // carries no modifier chain at all, so it never reaches the applier.)
+                // ({clip:name} DOES reach the applier now — it gained a chain — but never through
+                // here: 'next' is stateful and clipboard-only, and the slot heads resolve in
+                // ResolveRunStateTokens, which calls ApplyClipboardModifiers directly.)
                 if (TrySplitNextModifier(mods, out var restMods))
                 {
                     if (sync?.ClipNextReplay is { Count: > 0 } replay)
@@ -5371,8 +5372,15 @@ namespace TrueReplayer.Services
         // index group is DIGITS ONLY: "{winclip:trim}" cannot match it, so `trim` falls through to
         // the chain group and the index stays at its default of 1. (Before the chain existed,
         // "{winclip:trim}" matched nothing at all and was typed out literally.)
+        // A chain may not START with a digit. Without that guard the optional index BACKTRACKS
+        // away whenever the chain group cannot match after it, and the token still resolves:
+        // "{winclip:2-4}" and "{winclip:2:}" came out as index 1 with an inert chain, pasting the
+        // most recent clipboard item. In 2.19.1 both matched nothing and were typed out literally.
+        // Silently pasting the wrong item is a worse failure than visibly pasting the token text,
+        // because it looks like it worked — so a malformed index stays literal, as it was.
+        // No real modifier name begins with a digit, so nothing legitimate is excluded.
         private static readonly Regex WinClipTokenRegex = new(
-            @"\{winclip(?::(\d+))?(?::([^}]+))?\}",
+            @"\{winclip(?::(\d+))?(?::((?![0-9])[^}]+))?\}",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         // Resolves {winclip:N} against the Windows clipboard history. Fetches the history ONCE per

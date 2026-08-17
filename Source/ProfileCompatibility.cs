@@ -476,8 +476,12 @@ namespace TrueReplayer.Services
         // {winclip:N} / bare {winclip} — mirrors ActionExecution.WinClipTokenRegex (index optional,
         // bare = 1). Same token-resolved field set as the modified-row scan (that is exactly where a
         // {winclip} token can take effect).
+        // Widened with the chain the head gained, or this pin stops recognising its own token:
+        // {winclip:2:trim} matched nothing here, so a profile using it kept the right
+        // AppMinVersion only because the newer 2.20.0 pin happens to dominate — and the Info
+        // tab's "Required by" list quietly stopped naming the history token at all.
         private static readonly Regex WinClipTokenRegex = new(
-            @"\{winclip(?::\d+)?\}",
+            @"\{winclip(?::\d+)?(?::[^}]+)?\}",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         private static bool UsesWinClipToken(ActionItem a) =>
