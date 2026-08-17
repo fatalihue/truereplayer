@@ -19,11 +19,25 @@ export function Toast() {
     <div
       style={{
         position: 'fixed',
-        bottom: 40,
-        right: 16,
+        // Clear of the bottom chrome BY CONSTRUCTION, not by luck. Measured against the running
+        // app: the StatusBar is 26px, the ActionBar's top sits 72 layout px above the viewport
+        // bottom, and the BulkActionBar (h-8 = 32) stacks on top of it whenever rows are
+        // selected — so 104 is the worst case and this leaves 8px of air above it.
+        //
+        // It used to sit at bottom:40, which is inside the ActionBar: the toast landed squarely
+        // on Save/Load, and a notification that eats the click the user was about to make is
+        // worse than no notification. Bulk edits are exactly when toasts fire AND exactly when
+        // both of those bars are on screen.
+        bottom: 112,
+        // Centred over the action grid rather than pinned right, because the bottom-right corner
+        // is already taken: LiveVariablesPanel is `fixed bottom-10 right-3` and up to 45vh tall,
+        // so the two used to overlap whenever that pane was open.
+        left: '50%',
+        transform: 'translateX(-50%)',
         zIndex: 9999,
         display: 'flex',
         flexDirection: 'column-reverse',
+        alignItems: 'center',
         gap: 8,
         pointerEvents: 'none',
       }}
