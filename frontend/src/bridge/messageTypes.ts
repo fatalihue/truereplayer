@@ -467,6 +467,11 @@ export interface SettingsState {
 /** One executed action in the last run's report. Mirrors ActionReplayer.RunStepRecord. */
 export interface RunStep {
   row: number;                    // 1-based grid row
+  /** WHICH profile that row number belongs to. A RunProfile chain interleaves steps from
+   *  profiles whose rows are numbered independently, so `row` alone is ambiguous the moment a
+   *  chain is involved. Surfaced per step only when the run spanned more than one profile —
+   *  same rule as `tabUrl`, and for the same reason: noise on the common single-profile run. */
+  profile: string;
   actionType: string;
   detail: string | null;          // selector / coords / key — never a resolved value
   status: 'ok' | 'failed' | 'skipped';
@@ -485,6 +490,10 @@ export interface RunStep {
 }
 
 export interface RunReport {
+  /** The profile loaded in the UI when the report was REQUESTED — not a property of the
+   *  recorded run. It happens to equal the root on the automatic end-of-run push, but a manual
+   *  Refresh after switching profiles renames it. Nothing renders it; per-step provenance is
+   *  RunStep.profile, which is stamped at execution time and is the field to trust. */
   profile: string;
   startedAt: string | null;       // ISO; null when no run has been recorded yet
   overflow: number;               // steps dropped past the cap
@@ -640,12 +649,17 @@ export interface AppState {
 }
 
 /**
- * The two slices the backend pushes on a ~4 Hz cadence during a run. They are deliberately
+ * The slices the backend pushes on a ~4 Hz cadence during a run. They are deliberately
  * NOT part of AppState: every dispatch into the AppState reducer produces a new state object
  * and re-renders every useAppState() consumer, so leaving these in it meant a live Clicker
  * run re-rendered SettingsPanel, ProfilePanel and ActionTable four times a second to update
  * a counter only StatusBar and ClickerDashboard display. They live in their own provider and
- * their own hook (useClickerLive) so the cost lands only on the two components that read them.
+ * their own hook (useClickerLive) so the cost lands only on the components that read them.
+ *
+ * The name is historical — `chainStep` is a MACRO-mode slice, and ClickerDashboard isn't even
+ * mounted then (App renders it or the ActionTable, never both), so on a chained macro run the
+ * only consumer of this context is the StatusBar. Kept as-is rather than renamed: the rename
+ * would churn three files for no behaviour.
  */
 export interface ClickerLiveState {
   /**
@@ -666,6 +680,21 @@ export interface ClickerLiveState {
    * gates rendering on `active`. `total === 0` means infinite (rendered as "Loop X/∞").
    */
   loopProgress: {
+    active: boolean;
+    current: number;
+    total: number;
+  };
+  /**
+   * Row position inside the sub-profile a RunProfile chain is currently executing — the
+   * "(4/11)" tail StatusBar appends to the "A → B" read-out. Lives here rather than beside
+   * `replayChain` in AppState because the STACK changes only on push/pop while this lands
+   * ~4×/s, and AppState re-renders every consumer.
+   *
+   * `active` flips on the first push and is cleared by 'replay:chain' — a stack change means
+   * a different frame is running, and the counter it describes no longer applies. Without
+   * that clear, entering a second sub-profile would briefly show the first one's numbers.
+   */
+  chainStep: {
     active: boolean;
     current: number;
     total: number;
@@ -735,6 +764,9 @@ export type IncomingMessage =
   | { type: 'process:list'; payload: { processes: { name: string; title: string }[] } }
   | { type: 'clipboard:content'; payload: { text: string } }
   | { type: 'replay:chain'; payload: { stack: string[] } }
+  // Row position inside the sub-profile currently running (~4 Hz, engine-throttled). Handled by
+  // the live-slice reducer, NOT the AppState one — see ClickerLiveState.chainStep.
+  | { type: 'replay:chainStep'; payload: { current: number; total: number } }
   | { type: 'replay:paused'; payload: { hotkey: string; timeoutMs: number } }
   | { type: 'replay:resumed'; payload: Record<string, never> }
   // {input:Label} Ask-Input modal: the resolver paused replay to ask the user. `options` non-null

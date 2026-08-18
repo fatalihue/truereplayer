@@ -111,6 +111,7 @@ const initialState: AppState = {
 const initialClickerLive: ClickerLiveState = {
   clickerStats: { active: false, count: 0, elapsedMs: 0 },
   loopProgress: { active: false, current: 0, total: 0 },
+  chainStep: { active: false, current: 0, total: 0 },
 };
 
 function appStateReducer(state: AppState, message: IncomingMessage): AppState {
@@ -160,6 +161,9 @@ function appStateReducer(state: AppState, message: IncomingMessage): AppState {
     case 'statusbar:updated':
       return { ...state, statusBar: message.payload };
     case 'replay:chain':
+      // Also handled by clickerLiveReducer — not a duplicate: this reducer OWNS the stack, that
+      // one uses the same edge to invalidate its step counter. Renaming or dropping this message
+      // must touch both, or the counter silently keeps a dead frame's numbers.
       return { ...state, replayChain: message.payload.stack };
     case 'replay:paused':
       return {
@@ -176,10 +180,10 @@ function appStateReducer(state: AppState, message: IncomingMessage): AppState {
         ...state,
         pauseState: { isPaused: false, hotkey: '', timeoutMs: 0, startedAt: 0 },
       };
-    // 'clicker:stats' / 'macro:loopProgress' (clickerLiveReducer) and 'actions:highlight'
-    // (highlightReducer) are handled elsewhere, NOT here. Falling through to `default` is the
-    // point: returning `state` unchanged is what keeps a ~4 Hz stats push — or a per-action
-    // highlight push during replay — from re-rendering every useAppState() consumer.
+    // 'clicker:stats' / 'macro:loopProgress' / 'replay:chainStep' (clickerLiveReducer) and
+    // 'actions:highlight' (highlightReducer) are handled elsewhere, NOT here. Falling through to
+    // `default` is the point: returning `state` unchanged is what keeps a ~4 Hz stats push — or a
+    // per-action highlight push during replay — from re-rendering every useAppState() consumer.
     case 'settings:reset':
       // Increments on every explicit reset. SettingsPanel watches it in an effect to send
       // its non-persistent UI state (the clicker /s ↔ ms unit toggle) back to default.
@@ -235,6 +239,9 @@ function clickerLiveReducer(state: ClickerLiveInternal, message: IncomingMessage
         ...state,
         clickerStats: { active: true, count: 0, elapsedMs: 0 },
         loopProgress: { active: false, current: 0, total: 0 },
+        // chainStep follows loopProgress exactly: inactive until a run actually enters a
+        // sub-profile, so an unchained replay never shows the "(x/y)" tail.
+        chainStep: { active: false, current: 0, total: 0 },
       };
     case 'settings:loaded': {
       // Wipe the live slices when the MODE actually flips. They were previously cleared only
@@ -269,6 +276,19 @@ function clickerLiveReducer(state: ClickerLiveInternal, message: IncomingMessage
         ...state,
         loopProgress: { active: true, current: message.payload.current, total: message.payload.total },
       };
+    case 'replay:chainStep':
+      return {
+        ...state,
+        chainStep: { active: true, current: message.payload.current, total: message.payload.total },
+      };
+    case 'replay:chain':
+      // Handled in BOTH reducers, on purpose: AppState keeps the stack itself, and here a stack
+      // change invalidates the counter, because the numbers describe the frame that just ended
+      // or the one we haven't stepped into yet. Clearing rather than holding is what stops
+      // "A → C (9/9)" from flashing the previous sub-profile's total. The engine's next action
+      // re-arms it within one step (NotifyChainChanged zeroes its throttle for exactly this).
+      if (!state.chainStep.active) return state;   // identity-stable when there's nothing to clear
+      return { ...state, chainStep: { active: false, current: 0, total: 0 } };
     default:
       // Returning `state` unchanged is the whole point: every other message type leaves this
       // reducer's identity alone, so StatusBar and ClickerDashboard don't re-render for it.

@@ -204,6 +204,12 @@ namespace TrueReplayer.Services
             {
                 OnLoopProgress?.Invoke(current, total);
             };
+            // Chain step counter — same pass-through as the loop counter directly above; the
+            // inner replayer is the one that knows both the call stack and the row position.
+            replayer.OnChainStep = (current, total) =>
+            {
+                OnChainStep?.Invoke(current, total);
+            };
         }
 
         // Re-exposed events from the inner replayer so MainWindow/WebViewBridge can wire UI feedback.
@@ -433,6 +439,12 @@ namespace TrueReplayer.Services
         // genuine loops (LoopCount > 1 or infinite); single-shot replays never trigger it.
         // total == 0 signals infinite loop. Frontend renders "Loop X/Y" or "Loop X/∞".
         public Action<int, int>? OnLoopProgress;
+
+        // Chain step counter — re-exposed from the inner ActionReplayer. Fires only while a
+        // RunProfile sub-call is on the stack, so an unchained run never triggers it and the
+        // status bar's chain read-out stays hidden exactly as before. (current, total) is the
+        // sub-profile's row position, throttled to ~4 Hz at the source.
+        public Action<int, int>? OnChainStep;
 
         // Data-list lap notice — re-exposed from the inner ActionReplayer. Fires only in
         // cursor mode (data table present, "loop over data" OFF) when a run consumes the
@@ -1489,6 +1501,37 @@ namespace TrueReplayer.Services
         public Action<int, int>? OnLoopProgress;
         private long _lastLoopProgressMs;
 
+        // Bridge callback for the step counter on the status bar's chain read-out — "A → B (4/11)".
+        // Without it the read-out names the sub-profile but its progress counter freezes on the
+        // caller's RunProfile row for the whole sub-call, because that counter is derived from the
+        // row highlight and the highlight is deliberately blind to rows outside the loaded grid
+        // (see the OnActionExecuting map). A chain that is merely slow then reads as a hang.
+        //
+        // Throttled to ~4 Hz on the same TickCount64 scheme as OnLoopProgress, and for a sharper
+        // reason: this fires per ACTION, not per iteration, so a sub-profile of 20 ms actions would
+        // otherwise post a WebView2 message every 20 ms. NotifyChainChanged zeroes the stamp so the
+        // first action after a push/pop always lands immediately — otherwise a newly entered
+        // sub-profile would show the PREVIOUS one's count for up to a quarter second.
+        //
+        // Two known limits, both deliberate:
+        //  • RunProfile RepeatCount > 1 and the data-loop path re-enter ExecuteActionsAsync with
+        //    i = 0, so the counter restarts at 1 and nothing on screen says which pass. Note that
+        //    the "Loop x/y" indicator does NOT cover this: OnLoopProgress is emitted only by the
+        //    ROOT loop in StartAsync — neither the repeats loop in HandleRunProfile nor
+        //    RunSubProfileOverDataAsync emits anything. So a sub-profile repeated 300× over data
+        //    rows shows its counter sweeping 1..n over and over with no pass number anywhere.
+        //    Left as is deliberately: a per-pass counter for sub-calls is a second feature (it
+        //    needs its own emit sites and a third number on a 26 px bar), and the read-out's job
+        //    here is "is it alive", which a sweeping counter answers. Worth revisiting if chained
+        //    data-loops become common.
+        //  • It is announced at the TOP of the iteration, before the per-action delay and before
+        //    the conditional gate, so it counts If/Else/EndIf and IsSkipped rows. That is the
+        //    point: the denominator is actions.Count, which counts them too. Moving the emit down
+        //    next to the highlight would make the numerator skip rows the denominator still
+        //    includes, and the counter would stall short of its own total.
+        public Action<int, int>? OnChainStep;
+        private long _lastChainStepMs;
+
         // ── Profile chaining ──
         // Async lookup that resolves a profile name into its UserProfile. Returns null when missing.
         private Func<string, Task<Models.UserProfile?>>? _profileLookup;
@@ -1497,8 +1540,9 @@ namespace TrueReplayer.Services
         // target (caller uses subProfile.* directly) or no folder applies. Without this, a sub
         // inheriting from its folder would silently run against the caller's window.
         private Func<string, Controllers.ProfileController.FolderInheritedContext?>? _folderInheritedContextLookup;
-        // Active call stack of profile names (excluding the root). Used for cycle detection
-        // and for the status-bar "A → B → C" display.
+        // Active call stack of profile names, ROOT INCLUDED at index 0 (StartAsync pushes it —
+        // see the reset there). Used for cycle detection and for the status-bar "A → B → C"
+        // display, and Count >= 2 is the test for "we are inside a sub-profile right now".
         private readonly List<string> _callStack = new();
         // Run-global variable store behind SetVariable / {var:name}. Cleared at the start of
         // every replay run; deliberately NOT snapshot/restored around RunProfile sub-calls —
@@ -1610,6 +1654,12 @@ namespace TrueReplayer.Services
         public sealed class RunStepRecord
         {
             public int Row { get; set; }                  // 1-based grid row
+            // WHICH profile's row 1 this is. Sub-profiles execute through the same
+            // ExecuteActionsAsync loop, so a chained run interleaves rows from A and B that are
+            // numbered independently — without this, "row 4 failed" is unreadable the moment a
+            // RunProfile is involved, which is exactly when a report gets opened. Reference copy
+            // off the call stack (CurrentExecutingProfileName), so it costs nothing per action.
+            public string Profile { get; set; } = "";
             public string ActionType { get; set; } = "";
             public string? Detail { get; set; }           // selector / key / short label
             public string Status { get; set; } = "ok";    // ok | failed | skipped
@@ -2373,6 +2423,22 @@ namespace TrueReplayer.Services
                 if (token.IsCancellationRequested || _rowFaulted) break;
                 var action = actions[i];
 
+                // Chain read-out progress — see OnChainStep. Emitted only from inside a sub-profile
+                // (Count >= 2); at depth 1 the status bar hides the chain entirely and the root's
+                // own highlight-derived counter already covers it. The number is POSITION in the
+                // list, not steps-executed, which is what the root counter means too — and it has
+                // to be, because a conditional block skip jumps `i` past its body.
+                if (_callStack.Count >= 2)
+                {
+                    long chainNowMs = Environment.TickCount64;
+                    if (chainNowMs - _lastChainStepMs >= 250)
+                    {
+                        _lastChainStepMs = chainNowMs;
+                        int chainStep = i + 1, chainTotal = actions.Count;
+                        dispatcherQueue.TryEnqueue(() => OnChainStep?.Invoke(chainStep, chainTotal));
+                    }
+                }
+
                 // ── Conditional logic — handled before the regular Delay / Highlight /
                 // input-replay gate so block skips happen immediately (no spurious 0 ms
                 // Task.Delay) and ELSE/ENDIF don't trip the input-replay marker (they
@@ -2486,6 +2552,11 @@ namespace TrueReplayer.Services
                 var stepRec = new RunStepRecord
                 {
                     Row = i + 1,
+                    // Read per action rather than once per ExecuteActionsAsync call: the same call
+                    // frame can span a RunProfile that pushes and pops the stack, and reading it
+                    // here is what keeps the parent's rows stamped with the parent after the sub
+                    // returns.
+                    Profile = CurrentExecutingProfileName,
                     ActionType = action.ActionType ?? "",
                     // Skipped once the report is full: RecordRunStep discards the whole record from
                     // there on (it only bumps the overflow counter), so the string work — up to four
@@ -2495,6 +2566,20 @@ namespace TrueReplayer.Services
                     Detail = _runStepsFull ? null : DescribeStepDetail(action),
                 };
                 var stepWatch = System.Diagnostics.Stopwatch.StartNew();
+                // Appended on START, not on completion. RunStepRecord is a class and the catch /
+                // finally blocks below mutate this same instance in place, so reserving the slot
+                // here costs nothing and fixes the ORDER: a RunProfile row completes only after
+                // the entire sub-call, so recording at completion filed the caller's row AFTER
+                // every row of the profile it invoked. The report then opened on the sub-profile,
+                // and a nested A→B→C came out in pure post-order — the exact reverse of the call
+                // sequence. Start order narrates the chain as it ran, which is the whole premise
+                // of the per-profile grouping in the report panel.
+                //
+                // Two knock-ons, both improvements: the MaxRunStepRecords cut now drops by start
+                // order (before, a sub-profile that filled the cap discarded the very row that
+                // invoked it), and a report requested MID-run now shows in-flight rows with
+                // DurationMs still 0 instead of omitting them.
+                RecordRunStep(stepRec);
 
                 try
                 {
@@ -2736,8 +2821,10 @@ namespace TrueReplayer.Services
                 {
                     InputHookManager.IsReplayingAction = false;
                     stepWatch.Stop();
+                    // The record is already in the list (appended before the try) — this writes
+                    // through the reference the list holds, same as the Status / ErrorCode writes
+                    // in the catch blocks above.
                     stepRec.DurationMs = stepWatch.ElapsedMilliseconds;
-                    RecordRunStep(stepRec);
                 }
 
                 // Wait-class actions legitimately consume wall time — that time is the whole
@@ -3156,6 +3243,12 @@ namespace TrueReplayer.Services
 
         private void NotifyChainChanged()
         {
+            // Zeroed on every push/pop so the next action inside the new frame pushes its step
+            // immediately instead of waiting out the 250 ms throttle — the gap between naming a
+            // freshly entered sub-profile and correcting its counter is exactly where the
+            // PREVIOUS sub-profile's numbers would sit on screen. Deliberately outside the
+            // null-callback guard below: the stamp is engine state, not a UI concern.
+            _lastChainStepMs = 0;
             if (_onChainChanged == null) return;
             // Send a defensive copy so callers can't mutate our internal state.
             var snapshot = new List<string>(_callStack);

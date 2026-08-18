@@ -14,7 +14,7 @@ export function StatusBar() {
   // Separate contexts on purpose: the live slices update ~4×/s during a run and the highlight
   // advances once per executed action; keeping them out of AppState is what stops every other
   // panel re-rendering at those cadences.
-  const { clickerStats, loopProgress } = useClickerLive();
+  const { clickerStats, loopProgress, chainStep } = useClickerLive();
   const highlightedActionIndex = useHighlightedAction();
   const { send } = useBridge();
   const isReplaying = status === 'replaying';
@@ -23,6 +23,15 @@ export function StatusBar() {
   // render "Running ..." when the chain has at least 2 entries (root + a sub-call).
   // While running A alone, replayChain is ['A'] and we leave the chain hidden.
   const chainLabel = replayChain.length >= 2 ? replayChain.join(' → ') : null;
+  // Step counter for the DEEPEST frame — the one the chain label ends with, and the only one
+  // actually executing. The main progress read-out to the left can't say this: it is derived
+  // from the grid highlight, which is blind to rows that aren't in the loaded profile, so it
+  // sits frozen on the caller's RunProfile row until the sub-call returns. Rendered only while
+  // the engine is feeding it, so a chain shows plain "A → B" rather than a stale "(4/11)" in
+  // the gap between entering a sub-profile and its first step landing.
+  const chainStepLabel = chainLabel && chainStep.active
+    ? `${chainStep.current}/${chainStep.total}`
+    : null;
 
   // Elapsed timer. Anchored to Date.now() rather than an accumulating per-tick
   // counter (setInterval is throttled in background tabs / under load, which made
@@ -208,12 +217,21 @@ export function StatusBar() {
                 <>
                   <div className="w-px h-3 bg-border-subtle shrink-0" />
                   <span
-                    className="flex items-center gap-1.5 text-[11px] font-mono whitespace-nowrap"
+                    className="flex items-center gap-1.5 text-[11px] font-mono whitespace-nowrap min-w-0"
                     style={{ color: 'var(--color-action-runprofile-fg)' }}
-                    data-tip={chainLabel}
+                    data-tip={chainStepLabel ? `${chainLabel} · ${chainStepLabel}` : chainLabel}
                   >
-                    <Repeat size={10} />
-                    {chainLabel}
+                    <Repeat size={10} className="shrink-0" />
+                    {/* The NAME is what gives: it's user text of unbounded length, and the whole
+                        of it is already in the tooltip. The counter is the new information and is
+                        never more than a few characters, so it stays whole. Without min-w-0 the
+                        nowrap span refuses to shrink at all and pushes the clock and the version
+                        off the right edge — reachable with one long profile name, and the bar is
+                        already tight below the ~1074 px auto-collapse width. */}
+                    <span className="truncate">{chainLabel}</span>
+                    {chainStepLabel && (
+                      <span className="text-text-tertiary shrink-0">({chainStepLabel})</span>
+                    )}
                   </span>
                 </>
               )}

@@ -1447,6 +1447,7 @@ namespace TrueReplayer
                 steps = steps.Select(s => new
                 {
                     row = s.Row,
+                    profile = s.Profile,
                     actionType = s.ActionType,
                     detail = s.Detail,
                     status = s.Status,
@@ -4106,6 +4107,18 @@ namespace TrueReplayer
         public void PushReplayChainUpdate(List<string> stack)
         {
             SendMessage("replay:chain", new { stack });
+        }
+
+        /// <summary>
+        /// Row position inside the sub-profile currently executing, for the "(4/11)" tail on the
+        /// chain read-out. Kept OUT of replay:chain on purpose: the stack changes only on
+        /// push/pop, while this lands ~4×/s, and replay:chain feeds the main AppState reducer —
+        /// merging them would re-render every useAppState() consumer four times a second for the
+        /// whole of a chained run. React routes this one to the live-slice reducer instead.
+        /// </summary>
+        public void PushReplayChainStep(int current, int total)
+        {
+            SendMessage("replay:chainStep", new { current, total });
         }
 
         public void PushReplayPaused(string hotkey, int timeoutMs)

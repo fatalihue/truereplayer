@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { ListChecks, CheckCircle2, XCircle, MinusCircle, TriangleAlert, RefreshCw } from 'lucide-react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
+import { ListChecks, CheckCircle2, XCircle, MinusCircle, TriangleAlert, RefreshCw, Repeat } from 'lucide-react';
 import { useBridge } from '../bridge/BridgeContext';
 import { useTt } from '../state/LanguageContext';
 import { DialogShell } from './common/DialogShell';
@@ -85,7 +85,11 @@ export function RunReportPanel({ onClose }: { onClose: () => void }) {
     // A run is bound to ONE tab, so more than one distinct page across the steps means something
     // redirected it. Only worth showing when it happened — on a normal run this is 0 or 1.
     const pages = [...new Set(steps.map((s) => s.tabUrl).filter(Boolean))] as string[];
-    return { failed, total, drifting, pages };
+    // Row numbers restart at 1 inside every RunProfile sub-call, so on a chained run the `row`
+    // column is ambiguous on its own. More than one distinct profile here is what turns the
+    // per-profile grouping on — a plain single-profile run must look exactly as it did before.
+    const profiles = [...new Set(steps.map((s) => s.profile).filter(Boolean))] as string[];
+    return { failed, total, drifting, pages, profiles };
   }, [steps]);
 
   return (
@@ -133,7 +137,26 @@ export function RunReportPanel({ onClose }: { onClose: () => void }) {
             )}
             <div className="space-y-px">
               {steps.map((s, idx) => (
-                <div key={idx}
+                <Fragment key={idx}>
+                {/* Chain grouping. A header only where the executing profile CHANGES, rather than
+                    a name on every row: a run stays in one profile for a stretch at a time, so a
+                    repeated column would be noise, and the change points are exactly where the row
+                    numbers reset. Same ink as the status bar's chain read-out so the two describe
+                    one thing.
+
+                    A → B → A is normal, not a duplicate header: the steps are filed in START
+                    order, so a caller's RunProfile row is followed by the callee's rows and then
+                    by the caller's remaining rows — the caller legitimately appears on both sides
+                    of the profile it invoked. Under Loop the whole alternation repeats per
+                    iteration. */}
+                {stats.profiles.length > 1 && s.profile !== (idx > 0 ? steps[idx - 1].profile : null) && (
+                  <div className={`flex items-center gap-1.5 px-2 pb-0.5 text-[10px] font-mono ${idx > 0 ? 'pt-2' : ''}`}
+                    style={{ color: 'var(--color-action-runprofile-fg)' }}>
+                    <Repeat size={10} className="shrink-0" />
+                    <span className="truncate" data-tip={s.profile}>{s.profile}</span>
+                  </div>
+                )}
+                <div
                   className={`rounded px-2 py-1.5 ${s.status === 'failed' ? 'bg-bg-card' : 'hover:bg-bg-elevated/50'}`}>
                   <div className="flex items-center gap-2 text-[12px]">
                     <span className="w-7 shrink-0 text-right font-mono text-[10px] text-text-disabled">{s.row}</span>
@@ -182,6 +205,7 @@ export function RunReportPanel({ onClose }: { onClose: () => void }) {
                     </div>
                   )}
                 </div>
+                </Fragment>
               ))}
             </div>
             {(report?.overflow ?? 0) > 0 && (

@@ -282,6 +282,13 @@ namespace TrueReplayer
             {
                 bridge?.PushReplayChainUpdate(stack);
             });
+            // Chain step counter — the "(4/11)" tail on that same read-out. Separate push from
+            // the stack above because it arrives ~4×/s (throttled at the engine) and lands in a
+            // different React reducer; see PushReplayChainStep.
+            replayService.OnChainStep = (current, total) =>
+            {
+                bridge?.PushReplayChainStep(current, total);
+            };
 
             // ── Pause action wiring ──
             // ExecutePause raises these events; the bridge pushes them to React so the status
