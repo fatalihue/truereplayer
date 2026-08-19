@@ -200,8 +200,8 @@ function ColorRow({ label, value, overridden, wcagBg, hslOpen, onChange, onReset
             <span
               className="ml-auto inline-flex items-center gap-1 px-1.5 rounded font-mono text-[10px]"
               style={{
-                color: bad ? 'var(--color-recording)' : 'var(--color-warning)',
-                background: `color-mix(in srgb, ${bad ? 'var(--color-recording)' : 'var(--color-warning)'} 12%, transparent)`,
+                color: bad ? 'var(--color-recording)' : 'var(--color-warning-ink)',
+                background: `color-mix(in srgb, ${bad ? 'var(--color-recording)' : 'var(--color-warning)'} 8%, transparent)`,
               }}
               data-tip={tip}
             >

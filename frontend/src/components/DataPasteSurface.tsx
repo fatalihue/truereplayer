@@ -129,9 +129,9 @@ export function DataPasteSurface({
                     {ok ? (
                       <Check size={11} className="text-[color:var(--color-replay-fg)] shrink-0" />
                     ) : (
-                      <TriangleAlert size={11} className="text-warning shrink-0" />
+                      <TriangleAlert size={11} className="text-warning-ink shrink-0" />
                     )}
-                    <span className={ok ? 'text-text-secondary' : 'text-warning'}>
+                    <span className={ok ? 'text-text-secondary' : 'text-warning-ink'}>
                       {name || <span className="italic text-text-disabled">({tt('empty', 'vazio')})</span>}
                     </span>
                   </div>

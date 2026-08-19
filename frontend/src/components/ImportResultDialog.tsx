@@ -75,7 +75,7 @@ export function ImportResultDialog({ result, onClose }: ImportResultDialogProps)
         {result.imageFailureNames.length > 0 && (
           <section>
             <div className="font-medium text-warning-ink flex items-center gap-1.5">
-              <ImageOff size={12} style={{ color: 'var(--color-warning)' }} />
+              <ImageOff size={12} style={{ color: 'var(--color-warning-ink)' }} />
               Reference images not restored ({result.imageFailureNames.length})
             </div>
             {/* Index keys: the same image file name can fail in TWO profiles of one
@@ -114,13 +114,13 @@ export function ImportResultDialog({ result, onClose }: ImportResultDialogProps)
         {result.hotkeyCollisions.length > 0 && (
           <section>
             <div className="font-medium text-warning-ink flex items-center gap-1.5">
-              <Keyboard size={12} style={{ color: 'var(--color-warning)' }} />
+              <Keyboard size={12} style={{ color: 'var(--color-warning-ink)' }} />
               Hotkey collisions ({result.hotkeyCollisions.length})
             </div>
             <ul className="mt-1 space-y-1 text-text-secondary leading-relaxed">
               {result.hotkeyCollisions.map((msg, i) => (
                 <li key={i} className="flex items-start gap-1.5">
-                  <AlertTriangle size={11} className="mt-0.5 shrink-0" style={{ color: 'var(--color-warning)' }} />
+                  <AlertTriangle size={11} className="mt-0.5 shrink-0" style={{ color: 'var(--color-warning-ink)' }} />
                   <span>{msg}</span>
                 </li>
               ))}

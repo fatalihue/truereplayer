@@ -202,7 +202,7 @@ export function ImportPreviewDialog({ preview, onConfirm, onCancel }: ImportPrev
                 className="text-warning-ink flex items-center gap-1"
                 data-tip={tt('Resolved per row below — the banner applies to selected rows only.', 'Resolvidos linha a linha abaixo — o banner age só nas linhas selecionadas.')}
               >
-                <AlertTriangle size={11} style={{ color: 'var(--color-warning)' }} />
+                <AlertTriangle size={11} style={{ color: 'var(--color-warning-ink)' }} />
                 {conflictCountAll} name conflict{conflictCountAll === 1 ? '' : 's'}
               </span>
             )}
@@ -247,7 +247,7 @@ export function ImportPreviewDialog({ preview, onConfirm, onCancel }: ImportPrev
         {selectedConflictNames.length > 0 && (
           <div className="warning-band px-4 py-3 border-b border-border-subtle flex items-center gap-4 flex-wrap">
             <span className="text-xs font-medium text-warning-ink flex items-center gap-2">
-              <AlertTriangle size={14} style={{ color: 'var(--color-warning)' }} />
+              <AlertTriangle size={14} style={{ color: 'var(--color-warning-ink)' }} />
               {selectedConflictNames.length} name conflict{selectedConflictNames.length === 1 ? '' : 's'} — apply to all:
             </span>
             <SegmentedControl
@@ -271,14 +271,21 @@ export function ImportPreviewDialog({ preview, onConfirm, onCancel }: ImportPrev
                     ? 'border-border-subtle bg-bg-card hover:bg-bg-surface'
                     : ''
                 }`}
-                // Incompatible card: warning mixed into the neutral border + a 6%
-                // translucent tint. The border carries the read where the tint is
-                // too faint (saturated backgrounds); both work on light and dark.
+                // Incompatible card: the border carries the read, the 6% tint does not.
+                // Measured: mixed 30% into the neutral border it was 1.00–1.12:1 against a
+                // NORMAL neighbouring row on light and 1.56–2.05:1 on dark — i.e. below the
+                // 3:1 graphics floor on all 37 presets, not just the light ones. It now uses
+                // the per-theme derived ink (4.05–4.59 light, 4.84–8.87 dark) plus a 3px left
+                // edge, so position is the second channel.
+                // The 6% tint is knowingly NOT fixed: 1.14–1.27:1 on light, and no alpha of a
+                // yellow can clear 3:1 over a light surface. The "Requires TrueReplayer X or
+                // newer" line remains the primary read.
                 // NO whole-card opacity: it compounded with the disabled Checkbox's
                 // own opacity-50 (0.35 effective — the tooltip target vanished), and
                 // the user still needs to READ what an incompatible profile is.
                 style={p.compatible ? undefined : {
-                  borderColor: 'color-mix(in srgb, var(--color-warning) 30%, var(--color-border-subtle))',
+                  borderColor: 'var(--color-warning-ink)',
+                  borderLeftWidth: '3px',
                   background: 'color-mix(in srgb, var(--color-warning) 6%, transparent)',
                 }}
               >
@@ -372,7 +379,7 @@ export function ImportPreviewDialog({ preview, onConfirm, onCancel }: ImportPrev
                             'Este perfil tem um gatilho de automação. Ele chega DESARMADO — arme em Automation depois de importar.'
                           )}
                         >
-                          <Zap size={10} style={{ color: 'var(--color-warning)' }} />
+                          <Zap size={10} style={{ color: 'var(--color-warning-ink)' }} />
                           Automation trigger
                         </span>
                       )}
@@ -400,9 +407,14 @@ export function ImportPreviewDialog({ preview, onConfirm, onCancel }: ImportPrev
                                   ? tt('Not in this file — will call YOUR existing profile of this name.', 'Não está neste arquivo — vai chamar o SEU perfil existente com este nome.')
                                   : tt('Not found here or locally — this Run Profile step will do nothing at replay.', 'Não existe aqui nem localmente — este passo Run Profile não fará nada na reprodução.')
                             }
+                            // Both hues use their DERIVED ink, not the raw token: this is 10px
+                            // text. Raw --color-replay measured 1.32–1.89:1 on all 14 light
+                            // presets — the green chip was as invisible as the amber one beside
+                            // it, and fixing only the amber branch would have left two chips on
+                            // the same line at opposite legibility.
                             style={{
-                              color: d.status === 'inEnvelope' ? 'var(--color-replay)'
-                                   : d.status === 'missing' ? 'var(--color-warning)'
+                              color: d.status === 'inEnvelope' ? 'var(--color-replay-fg)'
+                                   : d.status === 'missing' ? 'var(--color-warning-ink)'
                                    : 'var(--color-text-tertiary)',
                               borderColor: 'var(--color-border-subtle)',
                             }}
@@ -442,7 +454,7 @@ export function ImportPreviewDialog({ preview, onConfirm, onCancel }: ImportPrev
 
                   {!p.compatible && (
                     <div className="mt-1.5 flex items-start gap-1.5 text-[11px] text-warning-ink">
-                      <AlertTriangle size={11} className="mt-0.5 flex-shrink-0" style={{ color: 'var(--color-warning)' }} />
+                      <AlertTriangle size={11} className="mt-0.5 flex-shrink-0" style={{ color: 'var(--color-warning-ink)' }} />
                       <span>
                         Requires TrueReplayer {p.appMinVersion} or newer — cannot import.
                       </span>

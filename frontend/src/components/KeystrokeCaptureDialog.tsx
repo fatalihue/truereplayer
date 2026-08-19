@@ -560,15 +560,11 @@ export function KeystrokeCaptureDialog({
                   token of the combo, so "Ctrl+S" gives "S" — never longer than the plain-key case),
                   which is what keeps the reserved height honest instead of merely close. */}
               <div
-                className={`border-l-2 rounded px-2.5 py-2 text-[10px] leading-relaxed text-text-secondary ${hasModifiers ? '' : 'invisible'}`}
-                style={{
-                  background: 'color-mix(in srgb, var(--color-warning) 8%, transparent)',
-                  borderColor: 'var(--color-warning)',
-                }}
+                className={`warning-band rounded-r px-2.5 py-2 text-[10px] leading-relaxed text-text-secondary ${hasModifiers ? '' : 'invisible'}`}
                 aria-hidden={!hasModifiers}
               >
                 {tt('Hold mode supports single keys only. Saving will hold', 'O modo Hold aceita apenas teclas únicas. Salvar vai segurar')}{' '}
-                <kbd className="px-1 py-px bg-bg-elevated border border-border-default rounded font-mono text-[10px] text-warning">
+                <kbd className="px-1 py-px bg-bg-elevated border border-border-default rounded font-mono text-[10px] text-warning-ink">
                   {keystrokeDisplay(heldKey)}
                 </kbd>{' '}
                 {tt(

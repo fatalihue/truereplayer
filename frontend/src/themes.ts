@@ -526,6 +526,11 @@ export const themes: ThemePreset[] = [
     // Better Solarized — Ethan Schoonover's Solarized Dark.
     // base03 #002b36, base02 #073642, base01 #586e75, base0 #839496,
     // base1 #93a1a1, blue #268bd2. Designed for low eye-strain contrast.
+    // bg-elevated #0c4351 is invented (the spec stops at base02) and was light enough
+    // to drop base1 body text to 4.05:1; darkened to #0b3b48 for 4.53:1. bg-surface
+    // (base03), bg-card (base02) and text-primary (base1) are canonical — leave them.
+    // Cost: the bg-card -> bg-elevated step is now 2.2 L*, near the shipped floor
+    // (lavender-coal 2.0, one-dark-pro 2.4). There is no more headroom on this side.
     id: 'solarized-dark',
     name: 'Better Solarized',
     preview: ['#001a22', '#002b36', '#073642', '#268bd2'],
@@ -533,7 +538,7 @@ export const themes: ThemePreset[] = [
       'bg-base': '#001a22',
       'bg-surface': '#002b36',
       'bg-card': '#073642',
-      'bg-elevated': '#0c4351',
+      'bg-elevated': '#0b3b48',
       'bg-input': '#00161c',
       'border-subtle': 'rgba(147,161,161,0.06)',
       'border-default': 'rgba(147,161,161,0.1)',
@@ -751,14 +756,22 @@ export const themes: ThemePreset[] = [
     // text-primary nudged from base01 #586e75 to #4a6066 — same blue-gray tone but
     // dark enough to clear WCAG AA (4.5:1) against bg-surface (#eee8d5). base01
     // against base2 was 4.4:1, just below the threshold.
+    // bg-card / bg-elevated are NOT Solarized: the spec defines only base3 and base2
+    // for light backgrounds, so both extra steps were invented here — and they were
+    // invented too dark. The old ramp fell 19.4 L* from bg-base to bg-elevated, the
+    // steepest of all 14 light presets (the other 13 span 10.4–14.4), which put body
+    // text at 4.40:1 on bg-card and 3.65:1 on bg-elevated. Raised to #e4dfd2 / #d9d7cc
+    // (5.00:1 / 4.61:1); the steps are now -5.0/-3.1/-3.0 L*, inside the shipped range.
+    // Do NOT fix this by darkening text-primary further — it is already off-spec, and
+    // the surfaces that fail are the invented ones, not the canonical base3/base2.
     id: 'solarized-light',
     name: 'Solarized Light',
-    preview: ['#fdf6e3', '#eee8d5', '#d8d2bf', '#268bd2'],
+    preview: ['#fdf6e3', '#eee8d5', '#e4dfd2', '#268bd2'],
     colors: {
       'bg-base': '#fdf6e3',
       'bg-surface': '#eee8d5',
-      'bg-card': '#d8d2bf',
-      'bg-elevated': '#c4c0b0',
+      'bg-card': '#e4dfd2',
+      'bg-elevated': '#d9d7cc',
       'bg-input': '#ffffff',
       'border-subtle': 'rgba(88,110,117,0.08)',
       'border-default': 'rgba(88,110,117,0.15)',
@@ -1276,46 +1289,92 @@ export function pickInk(fillHex: string): string {
     : '#1c1c1c';
 }
 
+/** True for the colour strings toHex can actually parse. Anything else toHex silently maps to
+ *  #000000, which would make a contrast derivation solve against black on a white surface. */
+function isParsableColor(c: unknown): c is string {
+  if (typeof c !== 'string') return false;
+  if (c.startsWith('#')) return c.length === 4 || c.length === 7 || c.length === 9;
+  return /rgba?\(\s*\d+\s*,\s*\d+\s*,\s*\d+/.test(c);
+}
+
 /**
- * A semantic hue that survives the theme it lands on, for use as INK — text,
- * icons, hairline borders — as opposed to a fill (fills keep the raw colour and
- * get their ink from pickInk above).
+ * Ink for warning TEXT, icons and hairlines, derived per theme.
  *
- * recordingColor/replayColor/clickerColor live in ThemeUISettings, not in the
- * preset, so every preset receives the same three values — and the defaults
- * were picked against a dark canvas. On the light presets the raw hues wash
- * out: replay green measures 1.77:1 as text on GitHub Light's bar, recording red
- * 2.16:1, clicker purple 2.13:1, all under the 3:1 floor for non-text UI.
+ * Three things make this different from adaptHueForInk, and each one was a measured bug first:
  *
- * A fixed mix percentage cannot fix that. It has to be large enough for the
- * worst light preset, which then needlessly desaturates every dark one. So
- * walk the hue toward the theme's own text colour and STOP at the first step
- * that clears `target`. Measured across every preset x hue: the dark presets
- * clear at 100% (they keep the user's colour untouched, all combinations),
- * and the light ones keep 70% of it on average.
+ * 1. It solves against EVERY surface the token is painted on, not one. Contrast against the raw
+ *    hue is V-shaped in luminance (minimum near L≈0.59), not monotone, so "the darkest surface"
+ *    and "the surface with least contrast against the text" both pick the wrong one on some
+ *    presets — solarized-light's hardest surface is bg-card, not bg-elevated.
+ * 2. It includes the TINTED composites. Every consumer sits on a surface plus a translucent amber
+ *    wash (8% for .warning-band, 6% for the incompatible card), and that wash drags the backdrop
+ *    toward the hue's own luminance, which always costs contrast. Solving against the bare surface
+ *    landed three light presets and nord below the target they were solved for. 0% and 8% bracket
+ *    the 6% case, so checking those two per surface covers all of them.
+ * 3. When nothing clears it returns the BEST candidate rather than text-primary. adaptHueForInk's
+ *    last-resort assumption ("clears by construction") is false for solarized-light, whose own
+ *    text is 3.65:1 on its own bg-elevated — a pre-existing palette defect this cannot repair.
+ *    On the shipped presets this is a no-op worth having rather than an improvement: measured,
+ *    solarized-light is the only preset that reaches the branch, and there the argmax candidate
+ *    IS text-primary, so the returned value is identical either way. It earns its keep only for
+ *    an authored theme whose text happens not to be the best available ink.
  *
- * `target` is 3.0 — the WCAG 1.4.11 floor for graphics and UI boundaries, which
- * is what these are. 4.5 was measured too and gutted the hue on light presets
- * (41% retained, some down to 10%), trading the identity this colour exists to
- * carry for a threshold that belongs to body text.
+ * Target is 4.5 because every consumer is 10–12px body text. That is deliberately NOT
+ * adaptHueForInk's default of 3, and must not be pushed back into it: 4.5 guts the hue, which is
+ * the documented reason 3 was chosen for recording/replay/clicker.
  */
-export function adaptHueForInk(hueHex: string, textPrimary: string, bgHex: string, target = 3): string {
+export function deriveHueInk(
+  hueHex: string,
+  textPrimary: string,
+  surfaces: unknown[],
+  target = 4.5,
+  maxTint = 0.08,
+  staticFallbackMix = 40,
+): string {
+  const usable = surfaces.filter(isParsableColor).map(toHex);
+  // No surface we can reason about: keep the static index.css recipe rather than inventing one.
+  if (usable.length === 0 || !isParsableColor(textPrimary)) {
+    // The hue passes through as authored rather than being swapped for amber when it is not a
+    // hex we can parse: color-mix() accepts named colours and hsl() perfectly well, and painting
+    // a recording indicator amber because its colour was spelled "red" would be a worse answer
+    // than either the real hue or a dropped declaration. A genuinely malformed value makes the
+    // whole declaration invalid, which is the loud failure and the one we want here.
+    const fallbackHue = typeof hueHex === 'string' && hueHex.trim() ? hueHex : '#FFC107';
+    return `color-mix(in srgb, ${fallbackHue} ${staticFallbackMix}%, ${isParsableColor(textPrimary) ? textPrimary : 'currentColor'})`;
+  }
   const hue = hexToRGB(toHex(hueHex));
   const text = hexToRGB(toHex(textPrimary));
-  // Coarse 5% steps: finer buys no visible accuracy and this runs on every
-  // theme change, including every drag of a colour picker.
-  for (let keep = 100; keep > 0; keep -= 5) {
+  const backdrops: string[] = [];
+  for (const s of usable) {
+    backdrops.push(s);
+    const b = hexToRGB(s);
+    backdrops.push(rgbToHex(       // the heaviest shipped wash of this hue, composited
+      hue.r * maxTint + b.r * (1 - maxTint),
+      hue.g * maxTint + b.g * (1 - maxTint),
+      hue.b * maxTint + b.b * (1 - maxTint),
+    ));
+  }
+  let best = toHex(textPrimary);
+  let bestWorst = -1;
+  for (let keep = 100; keep >= 0; keep -= 5) {
     const p = keep / 100;
     const candidate = rgbToHex(
       hue.r * p + text.r * (1 - p),
       hue.g * p + text.g * (1 - p),
       hue.b * p + text.b * (1 - p),
     );
-    if (contrastRatio(candidate, bgHex) >= target) return candidate;
+    let worst = Infinity;
+    for (const bg of backdrops) worst = Math.min(worst, contrastRatio(candidate, bg));
+    if (worst >= target) return candidate;          // first step that clears everywhere
+    if (worst > bestWorst) { bestWorst = worst; best = candidate; }
   }
-  // Nothing cleared: the theme's own text is the last resort, and it clears by
-  // construction. Reached only if a user picks a hue that matches their surface.
-  return toHex(textPrimary);
+  return best;
+}
+
+/** Warning amber at the constants it was solved and measured against: 8% is the heaviest wash
+ *  `.warning-band` paints, and 40% is the static recipe index.css falls back to before hydration. */
+export function deriveWarningInk(textPrimary: string, surfaces: unknown[], target = 4.5): string {
+  return deriveHueInk('#FFC107', textPrimary, surfaces, target, 0.08, 40);
 }
 
 // ── Accent Derivation ──
@@ -1527,20 +1586,51 @@ export function applyThemeConfig(colors: ThemeColors, uiSettings: ThemeUISetting
   parts.push(`--color-replay-bg: color-mix(in srgb, ${uiSettings.replayColor} 10%, transparent);`);
   parts.push(`--color-clicker: ${uiSettings.clickerColor};`);
   parts.push(`--color-clicker-bg: color-mix(in srgb, ${uiSettings.clickerColor} 12%, transparent);`);
-  // INK variants of the three semantic hues, adapted per theme (see
-  // adaptHueForInk). The raw tokens above stay the user's literal choice and go
-  // on FILLS; anything that paints the hue as text, an icon or a hairline uses
-  // these instead, or it disappears on the 11 light presets. Dark presets get
-  // the raw colour back unchanged, so this is invisible there by construction.
-  const surface = colors['bg-surface'];
+  // INK variants of the three semantic hues, adapted per theme. The raw tokens above stay the
+  // user's literal choice and go on FILLS; anything painting the hue as text, an icon or a
+  // hairline uses these instead, or it disappears on the 14 light presets.
+  //
+  // Target stays 3 — these are glyphs and boundaries, and 4.5 was measured to gut the hue
+  // (light retention 42% average, 10% minimum) for no gain on shapes.
+  //
+  // But the SURFACE set is no longer just bg-surface, and that was a real bug: these tokens are
+  // painted on bg-base (StatusBar), bg-surface (ActionBar), bg-card (grid rows) and bg-elevated
+  // (dialogs, toasts), plus the 10–12% hue washes under them. Solved against bg-surface alone,
+  // the token was BELOW ITS OWN 3:1 floor on 16/37 presets for recording (worst 1.90,
+  // solarized-light), 14/37 for replay and 16/37 for clicker — including two dark presets
+  // (nord 2.41, catppuccin-mocha 2.90). A user-picked hue close to their background made it
+  // worse: 16 of 30 hostile cases failed. Solving across all four surfaces and their 12%
+  // composites clears 37/37 and 30/30. maxTint 0.12 is the heaviest wash shipped
+  // (--color-clicker-bg above) — if a rule ever paints these over a heavier one, raise it here
+  // or the solve goes silently stale.
+  //
+  // Cost, and it is visible: light-preset hue retention drops ~26pp (recording 76.8→51.1,
+  // replay 58.9→40.4, clicker 72.1→48.6). Dark is essentially untouched (100→98.3/100/98.7).
+  const SURFACES = [colors['bg-surface'], colors['bg-card'], colors['bg-elevated'], colors['bg-base']];
   const ink = colors['text-primary'];
-  parts.push(`--color-recording-fg: ${adaptHueForInk(uiSettings.recordingColor, ink, surface)};`);
-  parts.push(`--color-replay-fg: ${adaptHueForInk(uiSettings.replayColor, ink, surface)};`);
-  const clickerFg = adaptHueForInk(uiSettings.clickerColor, ink, surface);
+  parts.push(`--color-recording-fg: ${deriveHueInk(uiSettings.recordingColor, ink, SURFACES, 3, 0.12, 72)};`);
+  parts.push(`--color-replay-fg: ${deriveHueInk(uiSettings.replayColor, ink, SURFACES, 3, 0.12, 72)};`);
+  const clickerFg = deriveHueInk(uiSettings.clickerColor, ink, SURFACES, 3, 0.12, 72);
   parts.push(`--color-clicker-fg: ${clickerFg};`);
   // The Clicker pill's border is a hairline on the bar, so it rides the adapted
   // hue too — at 30% of the raw purple it was 1.2:1 against a light bar.
   parts.push(`--color-clicker-border: color-mix(in srgb, ${clickerFg} 30%, transparent);`);
+  // Warning ink — same idea as the three hues above, but solved across ALL the surfaces it can
+  // land on and against their tinted composites; see deriveWarningInk for why one surface is not
+  // enough. Missing or unparsable palette keys are filtered there, so a custom preset without a
+  // bg-card can no longer take the whole theme apply down with it.
+  //
+  // The static color-mix in index.css is now only the pre-hydration fallback. Measured on the
+  // real elements: that fixed 40% recipe gave 13 of the 14 light presets under 4.5:1
+  // (solarized-light 1.98) and solarized-dark 4.43.
+  //
+  // Dark presets are NOT untouched, and it would be wrong to say so: the old 40% mix was a pale
+  // amber with lots of headroom, and returning the raw hue trades some of that away (worst
+  // measured after this change: nord). All stay above the floor, but the direction is a real
+  // cost, not a null result.
+  parts.push(`--color-warning-ink: ${deriveWarningInk(ink, [
+    colors['bg-surface'], colors['bg-card'], colors['bg-elevated'],
+  ])};`);
   // Ink for solid semantic fills (Recording/Replay/Clicker buttons + accent "Stop"
   // state) — contrast-picked per fill so no user color choice can produce the old
   // white-on-mid-green ≈ 2:1 pairing.

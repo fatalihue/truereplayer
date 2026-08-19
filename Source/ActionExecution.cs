@@ -1662,7 +1662,13 @@ namespace TrueReplayer.Services
             public string Profile { get; set; } = "";
             public string ActionType { get; set; } = "";
             public string? Detail { get; set; }           // selector / key / short label
-            public string Status { get; set; } = "ok";    // ok | failed | skipped
+            // running | ok | failed | skipped. Defaults to "running", NOT "ok": since 2.21.0 the
+            // record is filed BEFORE the action executes, so a report requested mid-run publishes
+            // steps that have not happened yet. Defaulting to "ok" painted those as green ticks
+            // with 0 ms — including the step that was hanging, which is the one the panel gets
+            // opened to diagnose. The finally below promotes running -> ok; every failure path
+            // writes its own status before it.
+            public string Status { get; set; } = "running";
             public long DurationMs { get; set; }
             // Browser diagnostics — null for every other action type.
             public string? ErrorCode { get; set; }        // ELEMENT_NOT_FOUND / HIDDEN / DISABLED / …
@@ -1722,6 +1728,34 @@ namespace TrueReplayer.Services
         /// that types, kept to the RAW authored text — never the resolved value, which is where a
         /// password or a customer's details would be.
         /// </summary>
+        /// <summary>
+        /// Detail line for an IF row in the run report: what was probed, and what it answered.
+        ///
+        /// The outcome is the whole point. Before this, a conditional macro's report showed no
+        /// evidence a condition had been evaluated at all — the reader saw the body rows of one
+        /// branch and had to infer backwards which way it went, on the very macro where "it took
+        /// the wrong branch" is the most likely complaint.
+        ///
+        /// `branchTrue` is null while the probe is still running (or when the whole block was
+        /// skipped), so the row says what it is checking without claiming an answer it does not
+        /// have yet.
+        /// </summary>
+        private static string? DescribeIfDetail(ActionItem a, bool? branchTrue)
+        {
+            string probe = string.IsNullOrWhiteSpace(a.ConditionType) ? "condition" : a.ConditionType!;
+            // IFNOT inverts the branch the user reads, so showing the raw probe result would
+            // contradict the row they are looking at. Name the negation instead.
+            if (a.ConditionNegate) probe = "NOT " + probe;
+            string? label = a.Comment;
+            if (!string.IsNullOrWhiteSpace(label))
+            {
+                label = label.Replace("\r", " ").Replace("\n", " ").Trim();
+                if (label.Length > 40) label = label.Substring(0, 40) + "…";
+                probe = $"{probe} · {label}";
+            }
+            return branchTrue is null ? probe : $"{probe} → {(branchTrue.Value ? "true" : "false")}";
+        }
+
         private static string? DescribeStepDetail(ActionItem a)
         {
             static string? Clip(string? s, int max = 60)
@@ -1758,7 +1792,9 @@ namespace TrueReplayer.Services
                 case "ActivateWindow":
                 case "WaitImage":
                 case "WaitPixelColor":
-                case "If":
+                // "If" is NOT here: IF rows never reach this switch — they are recorded from the
+                // conditional block above, through DescribeIfDetail, which also carries the
+                // branch outcome. Assert does come through here, sharing the same shape.
                 case "Assert":
                     return Clip(a.Comment) ?? Clip(a.Key, 30);
                 default:
@@ -2399,6 +2435,16 @@ namespace TrueReplayer.Services
         private static bool ShouldResyncAfter(ActionItem action) =>
             IsLongWaitAction(action.ActionType)
             || action.RepeatCount > 1
+            // Focus click is family 3, exactly like RepeatCount: the recording held ONE click and
+            // the replay performs TWO, so the 80 ms it adds (FocusClickGapMs 60 + two
+            // MoveClickDelayMs of 10) was never inside the gap the user recorded. Measured
+            // physically 2026-08-18 on a 10-pair profile: the focus-click rows cost 106-119 ms
+            // each against 21-25 ms for a plain click (Run Report, which times only the action),
+            // 864 ms across the run -- and wall clock was IDENTICAL to the same profile without
+            // focus click, i.e. every one of those 864 ms was being eaten out of the following
+            // delays. 82 rows across 20 of the owner's real profiles; Tranquility alone lost
+            // 1.28 s per run, with the settle after "click the search box" cut from 350 to ~264.
+            || action.IsFocusClick
             || (action.ConditionTimeout > 0
                 && string.Equals(action.ActionType, "Assert", StringComparison.OrdinalIgnoreCase));
 
@@ -2447,6 +2493,18 @@ namespace TrueReplayer.Services
                 {
                     if (action.IsSkipped)
                     {
+                        // Recorded before the jump: a greyed-out block is a deliberate choice, and
+                        // a report that simply omits it reads as "this never existed" rather than
+                        // "you turned this off" — which is the wrong answer to "why did nothing
+                        // happen?". The whole body is elided, so this one row stands for all of it.
+                        RecordRunStep(new RunStepRecord
+                        {
+                            Row = i + 1,
+                            Profile = CurrentExecutingProfileName,
+                            ActionType = "If",
+                            Detail = _runStepsFull ? null : DescribeIfDetail(action, null),
+                            Status = "skipped",
+                        });
                         // Block-level skip: jump past the whole IF/ELSE/ENDIF range so the
                         // body rows of BOTH branches are elided. Mirrors the visual
                         // "whole block is greyed out" the frontend renders for an IF row
@@ -2481,9 +2539,39 @@ namespace TrueReplayer.Services
                     }
                     // Highlight while the probe runs — user feedback "we're checking the condition".
                     dispatcherQueue.TryEnqueue(() => OnActionExecuting?.Invoke(action));
+                    // Filed BEFORE the probe, like every other step, so a report pulled while a
+                    // timed IF is still polling shows the row it is stuck on instead of omitting
+                    // it. Status starts "running" and the outcome is written below; a cancel
+                    // during the probe leaves it running, which is exactly what happened.
+                    var ifRec = new RunStepRecord
+                    {
+                        Row = i + 1,
+                        Profile = CurrentExecutingProfileName,
+                        ActionType = "If",
+                        Detail = _runStepsFull ? null : DescribeIfDetail(action, null),
+                    };
+                    var ifWatch = System.Diagnostics.Stopwatch.StartNew();
+                    RecordRunStep(ifRec);
                     bool branchTrue;
                     try { branchTrue = await EvaluateConditionWithTimeout(action, token); }
-                    catch (OperationCanceledException) { break; }
+                    catch (OperationCanceledException) { ifRec.Status = "skipped"; ifWatch.Stop(); ifRec.DurationMs = ifWatch.ElapsedMilliseconds; break; }
+                    catch (Exception ex)
+                    {
+                        // Reachable: a probe error under IfOnProbeError == "Halt" rethrows out of
+                        // InstantProbeAsync (the TreatAsFalse policy swallows it instead). Without
+                        // this the row would stay "running" and read as in-flight when it actually
+                        // killed the run — the same lie the in-flight default was fixed to stop
+                        // telling. Rethrown untouched so the halt still halts.
+                        ifRec.Status = "failed";
+                        ifRec.ErrorMessage = ex.Message;
+                        ifWatch.Stop();
+                        ifRec.DurationMs = ifWatch.ElapsedMilliseconds;
+                        throw;
+                    }
+                    ifWatch.Stop();
+                    ifRec.DurationMs = ifWatch.ElapsedMilliseconds;
+                    ifRec.Status = "ok";      // the PROBE ran; a false condition is an answer, not a failure
+                    if (!_runStepsFull) ifRec.Detail = DescribeIfDetail(action, branchTrue);
                     // A timed IF polls for up to ConditionTimeout ms — wall time that is the
                     // feature, not schedule debt. Same wait-class resync as the one after the
                     // action switch, for the same settle-delay reason. (If rows never reach
@@ -2825,6 +2913,12 @@ namespace TrueReplayer.Services
                     // through the reference the list holds, same as the Status / ErrorCode writes
                     // in the catch blocks above.
                     stepRec.DurationMs = stepWatch.ElapsedMilliseconds;
+                    // Success has no explicit write anywhere — it used to be the default. Promote
+                    // here rather than after the try: `finally` is the one place that runs on
+                    // EVERY exit, so no future `break`/`continue`/early return can leave a
+                    // finished step reading as still running. The catch blocks have already
+                    // written failed/skipped by now, so this only ever fires for a clean pass.
+                    if (stepRec.Status == "running") stepRec.Status = "ok";
                 }
 
                 // Wait-class actions legitimately consume wall time — that time is the whole

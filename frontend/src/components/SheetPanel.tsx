@@ -155,7 +155,7 @@ function estimateTier(selector: string): 'S' | 'A' | 'B' | 'C' {
 const TIER_META: Record<'S' | 'A' | 'B' | 'C', { color: string; label: string; labelPtBr: string; Icon: typeof ShieldCheck }> = {
   S: { color: 'var(--color-replay-fg)', label: 'Stable', labelPtBr: 'Estável', Icon: ShieldCheck },
   A: { color: 'var(--color-accent)', label: 'Strong', labelPtBr: 'Forte', Icon: ShieldCheck },
-  B: { color: 'var(--color-warning)', label: 'Decent', labelPtBr: 'Razoável', Icon: ShieldQuestion },
+  B: { color: 'var(--color-warning-ink)', label: 'Decent', labelPtBr: 'Razoável', Icon: ShieldQuestion },
   C: { color: 'var(--color-recording-fg)', label: 'Fragile', labelPtBr: 'Frágil', Icon: ShieldAlert },
 };
 
@@ -3432,7 +3432,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                     key={item.var}
                     type="button"
                     onClick={() => browserTextEditorRef.current?.insertText(item.var)}
-                    className="h-6 px-2 inline-flex items-center text-[11px] font-mono bg-bg-surface border border-border-subtle rounded text-text-secondary hover:text-warning hover:border-warning/40 transition-colors"
+                    className="h-6 px-2 inline-flex items-center text-[11px] font-mono bg-bg-surface border border-border-subtle rounded text-text-secondary hover:text-warning-ink hover:border-warning-ink/40 transition-colors"
                   >
                     {item.label}
                   </button>
@@ -3445,7 +3445,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                   className={`h-6 px-2 inline-flex items-center text-[11px] font-mono border rounded transition-colors ${
                     showMoreTypeChips
                       ? 'text-accent-light bg-accent-solid/15 border-accent-solid/50'
-                      : 'bg-bg-surface border-border-subtle text-text-secondary hover:text-warning hover:border-warning/40'
+                      : 'bg-bg-surface border-border-subtle text-text-secondary hover:text-warning-ink hover:border-warning-ink/40'
                   }`}
                   data-tip={showMoreTypeChips ? tt('Hide extra tokens', 'Ocultar tokens extras') : tt('More tokens (Tab, Date, Time, Random, clipboard slot/history/next line, Escape, Backspace, Delete, arrows)', 'Mais tokens (Tab, Date, Time, Random, slot/histórico/próxima linha do clipboard, Escape, Backspace, Delete, setas)')}
                 >
@@ -3475,7 +3475,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                       key={item.var}
                       type="button"
                       onClick={() => browserTextEditorRef.current?.insertText(item.var)}
-                      className="h-6 px-2 inline-flex items-center text-[11px] font-mono bg-bg-surface border border-border-subtle rounded text-text-secondary hover:text-warning hover:border-warning/40 transition-colors"
+                      className="h-6 px-2 inline-flex items-center text-[11px] font-mono bg-bg-surface border border-border-subtle rounded text-text-secondary hover:text-warning-ink hover:border-warning-ink/40 transition-colors"
                     >
                       {item.label}
                     </button>
@@ -3754,7 +3754,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                   // Rich payload warning: this textarea edits only the PLAIN flavor, and a
                   // saved key change drops the formatting (bridge nulls KeyHtml). Point the
                   // user at the Insert Text dialog for formatted editing.
-                  <div className="mt-1 text-[10px] text-warning leading-snug">
+                  <div className="mt-1 text-[10px] text-warning-ink leading-snug">
                     {tt('Formatted text — saving a change here converts it to plain. Use the row’s Insert Text editor to keep formatting.',
                         'Texto formatado — salvar uma mudança aqui converte para texto puro. Use o editor Insert Text da linha para manter a formatação.')}
                   </div>
@@ -4395,7 +4395,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
               panel just fired) makes the terse "Esc again to discard" clear. min-w-0 is the
               safety net; the buttons stay shrink-0 / nowrap so "Save Changes" never wraps. */}
           <span
-            className="flex-1 min-w-0 truncate text-[11px] text-warning transition-opacity duration-150 pointer-events-none"
+            className="flex-1 min-w-0 truncate text-[11px] text-warning-ink transition-opacity duration-150 pointer-events-none"
             style={{ opacity: escArmed ? 1 : 0 }}
           >
             {tt('Esc discards', 'Esc descarta')}

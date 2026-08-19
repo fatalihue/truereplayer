@@ -59,11 +59,30 @@ function AutoCollapseOnZoom({ setSidebarCollapsed, setSettingsCollapsed, autoCol
 }) {
   // The threshold is expressed in LAYOUT px and scaled by the UI zoom setting
   // (root.style.zoom, default 90%): zoom scales the layout, not innerWidth, so
-  // the same window width fits more/less UI depending on zoom. 1074 layout px
-  // ≈ both expanded panels + a usable grid (≡ 967 device px at the 90% default,
-  // 1020 back when the default was 95% — a smaller zoom fits more UI in the same
-  // window, so the panels correctly hold out to a narrower window before folding).
-  const NARROW_THRESHOLD_LAYOUT = 1074;
+  // the same window width fits more/less UI depending on zoom.
+  //
+  // Was 1074, which was ~60 px too low and opened a DEAD BAND: between 1074 and 1134 both
+  // panels stayed expanded while the grid no longer fit, so the window landed on a broken
+  // layout instead of the collapsed one. Measured with a 66-action profile loaded, both rails
+  // expanded, at the 90% default zoom:
+  //
+  //   layout 1064 → collapsed, centre 948, overflow 0      (the good narrow layout)
+  //   layout 1087 → EXPANDED,  centre 583, overflow 47, Notes 0 px
+  //   layout 1120 → EXPANDED,  centre 616, overflow 14, Notes 26 px
+  //   layout 1134 → EXPANDED,  centre 630, overflow  0, Notes 40 px   ← first clean width
+  //   layout 1187 → EXPANDED,  centre 683, overflow  0, Notes 93 px
+  //
+  // The floor is the grid's own fixed columns: the colgroup in ActionTable pins
+  // 28+50+152+280+80 = 590 px, and Notes takes whatever is left, so the centre column has to
+  // clear 630 before anything is left over for it. 1134 is where overflow reaches zero, but
+  // Notes is 40 px there — present and useless. 1187 is the width at which Notes gets ~93 px,
+  // i.e. enough for the short labels it actually holds ("Search", "Add", "+ Itens").
+  //
+  // The trade this makes: the panels now fold at ~1068 device px instead of ~967, so a window
+  // between those loses the rails earlier. That is the point — the collapsed layout gives the
+  // grid 948 px against the 583 it had while broken. A rail the user re-expands while narrow
+  // stays expanded (autoCollapsedRef), so the old behaviour is still reachable on purpose.
+  const NARROW_THRESHOLD_LAYOUT = 1187;
   const { config: themeConfig } = useTheme();
   const zoomScale = (themeConfig.uiSettings.zoom ?? 90) / 100;
   const wasNarrowRef = useRef(false);

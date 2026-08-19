@@ -225,7 +225,7 @@ const MORE_ROW_CHIPS: PaletteChip[] = [
 
 // One chip recipe everywhere (SheetPanel parity): neutral surface, gold hover.
 const CHIP_CLASS =
-  'h-6 px-2 inline-flex items-center text-[11px] font-mono bg-bg-surface border border-border-subtle rounded text-text-secondary hover:text-warning hover:border-warning/40 transition-colors';
+  'h-6 px-2 inline-flex items-center text-[11px] font-mono bg-bg-surface border border-border-subtle rounded text-text-secondary hover:text-warning-ink hover:border-warning-ink/40 transition-colors';
 
 // ── Name prompt popover ({Variable…} / {Row column…}) ──────────────────────
 //

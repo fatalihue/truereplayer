@@ -51,11 +51,17 @@
      migration toasts). Was ~10 scattered #FFC107 literals; consumers use
      text-warning / border-warning/N / bg-warning/N or color-mix derivations. */
   --color-warning: #FFC107;
-  /* Ink for warning TEXT on any surface — the hue pulled 40% toward the theme's
-     text (the loop-unsaved-dot recipe below: 2.97:1 on the 11 light presets,
-     6.74:1 on dark, measured with the repo's contrastRatio). Raw --color-warning
-     is for shapes, borders and translucent tints only; yellow text dies on light
-     presets. References vars, so it re-resolves per theme with no themes.ts row. */
+  /* Ink for warning TEXT, icons and hairlines. Raw --color-warning is for translucent
+     tints and fills only; yellow text dies on light presets.
+
+     PRE-HYDRATION FALLBACK ONLY — applyThemeConfig overwrites this on every theme apply
+     with a value derived per theme (adaptHueForInk against the theme's hardest surface,
+     target 4.5). This fixed 40% mix is what paints the boot frame before the theme lands.
+
+     Do not restore this as the real value: it was MEASURED at 2.97:1 on light, and that
+     number was written here as if it were acceptable. It is below the 4.5:1 floor for body
+     text, and every consumer of this token is 10–12px. 13 of the 14 light presets failed
+     (solarized-light 2.00), and so did solarized-dark at 4.24. */
   --color-warning-ink: color-mix(in srgb, var(--color-warning) 40%, var(--color-text-primary));
 
   /* Static fallback for the UI zoom, overwritten by applyTheme on every theme apply.
@@ -525,10 +531,11 @@ html[data-animations="true"] .replay-btn-glow {
    the accent skin.
    The hue is --color-warning pulled 40% toward the theme's text, much further
    than the 72% used for the rail, and deliberately: --color-warning is ONE fixed
-   #FFC107 across all 48 presets and yellow is intrinsically light, so on the 11
+   #FFC107 across all 37 presets and yellow is intrinsically light, so on the 14
    light presets no alpha of raw amber clears ~1.2:1 against the bar — measured
    across every preset with the repo's own contrastRatio. At 40% it reaches
-   2.97:1 there and 6.74:1 on the dark presets.
+   ~2.97:1 there and ~6.74:1 on the dark presets, which is above the 3:1 floor
+   this mark answers to (it is a shape, not text) on all but a hairline margin.
    The 2px ring in the bar's own colour is the second channel: it cuts the dot
    out of whatever sits behind it, so the mark still reads as a shape on the
    presets where the hue is weakest. Absolutely positioned on purpose — it costs
@@ -541,17 +548,31 @@ html[data-animations="true"] .replay-btn-glow {
   width: 8px;
   height: 8px;
   border-radius: 50%;
+  /* Deliberately NOT --color-warning-ink. That token targets 4.5:1 because its consumers are
+     10–12px body text; this is an 8px DOT, whose floor is the 3:1 for graphics — and solving a
+     shape to a text threshold is exactly what desaturates the hue away. Measured: on the token
+     the dot turns neutral grey / blue-grey / purple on five presets, i.e. more legible but no
+     longer identifiable as a warning, which is the wrong trade for a mark whose only job is
+     identity. Kept as its own 40% mix on purpose. */
   background: color-mix(in srgb, var(--color-warning) 40%, var(--color-text-primary));
   box-shadow: 0 0 0 2px var(--color-bg-surface);
 }
 
-/* WARNING BAND — the one idiom for "these lines carry a caution": left rule in the
-   raw hue + an 8% translucent tint that survives all presets, light and dark
-   (KeystrokeCaptureDialog established it; the import/export dialogs share it via
-   this class so the tint can never drift per-copy). Pair the text inside with
-   text-warning-ink; the raw hue is for the rule/shapes only. */
+/* WARNING BAND — the one idiom for "these lines carry a caution": a left rule plus an 8%
+   translucent tint (KeystrokeCaptureDialog established it; the import/export dialogs share
+   it via this class so the tint can never drift per-copy).
+
+   The rule carries the read ALONE on light presets, and it needs both of its properties to
+   do that. Colour: in the raw hue it measured 1.00–1.20:1 against the card on all 14 light
+   presets — invisible — so it rides --color-warning-ink, which is derived per theme.
+   Width: 2px at the app's 0.9 zoom computes to 1.111px, i.e. ONE device pixel; 3px computes
+   to 2.222px and actually reads as a rule.
+
+   The 8% tint stays and is knowingly NOT fixed: it measures 1.00–1.03:1 on every light
+   preset and cannot be saved, because no alpha of a yellow clears 3:1 over a light surface.
+   Weight and position are the second channel instead of fill. */
 .warning-band {
-  border-left: 2px solid var(--color-warning);
+  border-left: 3px solid var(--color-warning-ink);
   background: color-mix(in srgb, var(--color-warning) 8%, transparent);
 }
 
