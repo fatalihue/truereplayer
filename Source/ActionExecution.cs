@@ -1728,6 +1728,34 @@ namespace TrueReplayer.Services
         /// that types, kept to the RAW authored text — never the resolved value, which is where a
         /// password or a customer's details would be.
         /// </summary>
+        /// <summary>
+        /// Detail line for an IF row in the run report: what was probed, and what it answered.
+        ///
+        /// The outcome is the whole point. Before this, a conditional macro's report showed no
+        /// evidence a condition had been evaluated at all — the reader saw the body rows of one
+        /// branch and had to infer backwards which way it went, on the very macro where "it took
+        /// the wrong branch" is the most likely complaint.
+        ///
+        /// `branchTrue` is null while the probe is still running (or when the whole block was
+        /// skipped), so the row says what it is checking without claiming an answer it does not
+        /// have yet.
+        /// </summary>
+        private static string? DescribeIfDetail(ActionItem a, bool? branchTrue)
+        {
+            string probe = string.IsNullOrWhiteSpace(a.ConditionType) ? "condition" : a.ConditionType!;
+            // IFNOT inverts the branch the user reads, so showing the raw probe result would
+            // contradict the row they are looking at. Name the negation instead.
+            if (a.ConditionNegate) probe = "NOT " + probe;
+            string? label = a.Comment;
+            if (!string.IsNullOrWhiteSpace(label))
+            {
+                label = label.Replace("\r", " ").Replace("\n", " ").Trim();
+                if (label.Length > 40) label = label.Substring(0, 40) + "…";
+                probe = $"{probe} · {label}";
+            }
+            return branchTrue is null ? probe : $"{probe} → {(branchTrue.Value ? "true" : "false")}";
+        }
+
         private static string? DescribeStepDetail(ActionItem a)
         {
             static string? Clip(string? s, int max = 60)
@@ -1764,7 +1792,9 @@ namespace TrueReplayer.Services
                 case "ActivateWindow":
                 case "WaitImage":
                 case "WaitPixelColor":
-                case "If":
+                // "If" is NOT here: IF rows never reach this switch — they are recorded from the
+                // conditional block above, through DescribeIfDetail, which also carries the
+                // branch outcome. Assert does come through here, sharing the same shape.
                 case "Assert":
                     return Clip(a.Comment) ?? Clip(a.Key, 30);
                 default:
@@ -2463,6 +2493,18 @@ namespace TrueReplayer.Services
                 {
                     if (action.IsSkipped)
                     {
+                        // Recorded before the jump: a greyed-out block is a deliberate choice, and
+                        // a report that simply omits it reads as "this never existed" rather than
+                        // "you turned this off" — which is the wrong answer to "why did nothing
+                        // happen?". The whole body is elided, so this one row stands for all of it.
+                        RecordRunStep(new RunStepRecord
+                        {
+                            Row = i + 1,
+                            Profile = CurrentExecutingProfileName,
+                            ActionType = "If",
+                            Detail = _runStepsFull ? null : DescribeIfDetail(action, null),
+                            Status = "skipped",
+                        });
                         // Block-level skip: jump past the whole IF/ELSE/ENDIF range so the
                         // body rows of BOTH branches are elided. Mirrors the visual
                         // "whole block is greyed out" the frontend renders for an IF row
@@ -2497,9 +2539,26 @@ namespace TrueReplayer.Services
                     }
                     // Highlight while the probe runs — user feedback "we're checking the condition".
                     dispatcherQueue.TryEnqueue(() => OnActionExecuting?.Invoke(action));
+                    // Filed BEFORE the probe, like every other step, so a report pulled while a
+                    // timed IF is still polling shows the row it is stuck on instead of omitting
+                    // it. Status starts "running" and the outcome is written below; a cancel
+                    // during the probe leaves it running, which is exactly what happened.
+                    var ifRec = new RunStepRecord
+                    {
+                        Row = i + 1,
+                        Profile = CurrentExecutingProfileName,
+                        ActionType = "If",
+                        Detail = _runStepsFull ? null : DescribeIfDetail(action, null),
+                    };
+                    var ifWatch = System.Diagnostics.Stopwatch.StartNew();
+                    RecordRunStep(ifRec);
                     bool branchTrue;
                     try { branchTrue = await EvaluateConditionWithTimeout(action, token); }
-                    catch (OperationCanceledException) { break; }
+                    catch (OperationCanceledException) { ifRec.Status = "skipped"; ifWatch.Stop(); ifRec.DurationMs = ifWatch.ElapsedMilliseconds; break; }
+                    ifWatch.Stop();
+                    ifRec.DurationMs = ifWatch.ElapsedMilliseconds;
+                    ifRec.Status = "ok";      // the PROBE ran; a false condition is an answer, not a failure
+                    if (!_runStepsFull) ifRec.Detail = DescribeIfDetail(action, branchTrue);
                     // A timed IF polls for up to ConditionTimeout ms — wall time that is the
                     // feature, not schedule debt. Same wait-class resync as the one after the
                     // action switch, for the same settle-delay reason. (If rows never reach
