@@ -96,7 +96,12 @@ export function RunReportPanel({ onClose }: { onClose: () => void }) {
     <DialogShell
       icon={<ListChecks size={14} className="text-accent-light" />}
       title="Run report"
-      widthClass="w-[720px] h-[70vh] max-h-[640px]"
+      // Height tracks the window instead of a fixed cap: this is a diagnostic LIST, and the
+      // 640px ceiling meant a maximised window showed the same six rows as a small one — the
+      // chain reports 2.21.0 exists to make readable are exactly the long ones. Divided by
+      // --ui-zoom for the same reason PANEL_SIZE is (DialogShell:41): raw vh is measured before
+      // the app's 0.9 zoom scales it down, so 85vh would paint as 76vh.
+      widthClass="w-[720px] h-[calc(85vh/var(--ui-zoom))]"
       maxWidthClass="max-w-[calc(100vw-24px)]"
       onClose={onClose}
       showClose
@@ -115,7 +120,9 @@ export function RunReportPanel({ onClose }: { onClose: () => void }) {
         </>
       )}
     >
-      <div className="h-full overflow-y-auto p-3">
+      {/* flex-1 min-h-0, not h-full: the card is `flex flex-col` and this is a direct flex item,
+          so an intrinsic height ignores the space the header and footer leave over (DialogShell:38). */}
+      <div className="flex-1 min-h-0 overflow-y-auto p-3">
         {steps.length === 0 ? (
           <div className="h-full flex items-center justify-center text-center text-[12px] text-text-tertiary px-8 leading-relaxed">
             {tt('No run recorded yet. Play a profile and the steps will show up here — with the selector that matched, how long each step took, and why any of them failed.',

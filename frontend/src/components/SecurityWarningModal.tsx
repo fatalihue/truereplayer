@@ -33,7 +33,7 @@ export function SecurityWarningModal({ fileName, profileCount, onContinue, onCan
 
   return (
     <DialogShell
-      icon={<AlertTriangle size={14} style={{ color: 'var(--color-warning)' }} />}
+      icon={<AlertTriangle size={14} style={{ color: 'var(--color-warning-ink)' }} />}
       title="Heads up"
       widthClass="w-[520px]"
       onClose={onCancel}

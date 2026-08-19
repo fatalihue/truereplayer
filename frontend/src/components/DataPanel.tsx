@@ -22,7 +22,7 @@ interface DataPanelProps {
 const VALID_HEADER = /^[A-Za-z0-9_]+$/;
 // One chip recipe everywhere (SheetPanel / Insert Text parity).
 const CHIP_CLASS =
-  'h-6 px-2 inline-flex items-center text-[11px] font-mono bg-bg-surface border border-border-subtle rounded text-text-secondary hover:text-warning hover:border-warning/40 transition-colors';
+  'h-6 px-2 inline-flex items-center text-[11px] font-mono bg-bg-surface border border-border-subtle rounded text-text-secondary hover:text-warning-ink hover:border-warning-ink/40 transition-colors';
 // Read-only render cap: beyond this the grid stays visible but cell editing is
 // disabled (the paste surface remains the bulk editor). Keeps typing O(1) without
 // speculative virtualization.
@@ -852,18 +852,18 @@ export function DataPanel({ onClose }: DataPanelProps) {
       {loopOverData && grid.rows.length > 0 && (
         <span style={{ color: 'var(--color-replay-fg)' }}> · {grid.rows.length} {tt('iterations/run', 'iterações/execução')}</span>
       )}
-      {dirty && <span className="text-warning"> · {tt('unsaved', 'não salvo')}</span>}
-      {invalidCount > 0 && <span className="text-warning"> · {invalidCount} {tt('invalid', 'inválido(s)')}</span>}
+      {dirty && <span className="text-warning-ink"> · {tt('unsaved', 'não salvo')}</span>}
+      {invalidCount > 0 && <span className="text-warning-ink"> · {invalidCount} {tt('invalid', 'inválido(s)')}</span>}
     </span>
   );
   // Hint ladder — first match wins.
   const stripRight = (() => {
     const cls = 'text-[10px] truncate';
     if (editing) return <span className={`${cls} text-text-tertiary`}>{tt('Enter commits · Alt+Enter line break · Esc reverts', 'Enter confirma · Alt+Enter quebra linha · Esc reverte')}</span>;
-    if (willClear) return <span className={`${cls} text-warning`}>{tt('Saving now clears the stored table.', 'Salvar agora apaga a tabela armazenada.')}</span>;
-    if (loopOverData && grid.rows.length === 0) return <span className={`${cls} text-warning`}>{tt('Replay will refuse to start: no rows.', 'O replay vai recusar iniciar: sem linhas.')}</span>;
-    if (escArmed) return <span className={`${cls} text-warning`}>{tt('Unsaved changes — press Esc again to discard.', 'Alterações não salvas — pressione Esc de novo para descartar.')}</span>;
-    if (readOnly) return <span className={`${cls} text-warning`}>{tt('Large table — grid is read-only; edit via Paste / bulk edit.', 'Tabela grande — grade somente leitura; edite via Paste / bulk edit.')}</span>;
+    if (willClear) return <span className={`${cls} text-warning-ink`}>{tt('Saving now clears the stored table.', 'Salvar agora apaga a tabela armazenada.')}</span>;
+    if (loopOverData && grid.rows.length === 0) return <span className={`${cls} text-warning-ink`}>{tt('Replay will refuse to start: no rows.', 'O replay vai recusar iniciar: sem linhas.')}</span>;
+    if (escArmed) return <span className={`${cls} text-warning-ink`}>{tt('Unsaved changes — press Esc again to discard.', 'Alterações não salvas — pressione Esc de novo para descartar.')}</span>;
+    if (readOnly) return <span className={`${cls} text-warning-ink`}>{tt('Large table — grid is read-only; edit via Paste / bulk edit.', 'Tabela grande — grade somente leitura; edite via Paste / bulk edit.')}</span>;
     if (grid.rows.length >= LARGE_TABLE_WARN) return <span className={`${cls} text-text-tertiary`}>{tt('Large table — the profile file grows with it.', 'Tabela grande — o arquivo do perfil cresce junto.')}</span>;
     if (!loopOverData && !emptyGrid) return <span className={`${cls} text-text-tertiary`}>{tt('Loop off: each run uses the next row. Right-click → Reset row position.', 'Loop desligado: cada execução usa a próxima linha. Botão direito → Reset row position.')}</span>;
     return <span className={`${cls} text-text-tertiary`}>{tt('Click a cell to edit · Ctrl+Enter saves', 'Clique numa célula para editar · Ctrl+Enter salva')}</span>;
@@ -987,7 +987,7 @@ export function DataPanel({ onClose }: DataPanelProps) {
                         <th
                           key={c}
                           className={`group sticky top-0 z-10 bg-bg-surface shadow-[inset_0_-1px_0_var(--color-border-subtle)] h-row text-left text-xs font-semibold font-mono px-2 whitespace-nowrap ${
-                            meta.valid ? 'text-text-tertiary' : 'text-warning'
+                            meta.valid ? 'text-text-tertiary' : 'text-warning-ink'
                           } ${editingThis ? 'shadow-[inset_0_0_0_1.5px_var(--color-accent-solid)] bg-bg-input' : ''}`}
                         >
                           {editingThis ? (
@@ -1002,7 +1002,7 @@ export function DataPanel({ onClose }: DataPanelProps) {
                               <button
                                 type="button"
                                 onClick={() => { if (!readOnly) setEditing({ kind: 'header', c }); }}
-                                className={`truncate ${meta.dup ? 'underline decoration-dotted decoration-warning/60 underline-offset-2' : ''} ${readOnly ? '' : 'cursor-text'}`}
+                                className={`truncate ${meta.dup ? 'underline decoration-dotted decoration-warning-ink underline-offset-2' : ''} ${readOnly ? '' : 'cursor-text'}`}
                                 data-tip={meta.dup ? tt('Duplicate column — the last one wins at replay.', 'Coluna duplicada — a última vence no replay.') : undefined}
                               >
                                 {meta.name || <span className="text-text-disabled italic">({tt('empty', 'vazio')})</span>}
@@ -1205,8 +1205,8 @@ export function DataPanel({ onClose }: DataPanelProps) {
                         </>
                       ) : (
                         <>
-                          <TriangleAlert size={11} className="text-warning shrink-0" />
-                          <span className="text-[11px] font-mono text-warning truncate">
+                          <TriangleAlert size={11} className="text-warning-ink shrink-0" />
+                          <span className="text-[11px] font-mono text-warning-ink truncate">
                             {meta.name || `(${tt('empty', 'vazio')})`}
                           </span>
                           <button
@@ -1227,10 +1227,10 @@ export function DataPanel({ onClose }: DataPanelProps) {
                 })}
                 {orphans.map(([name, count]) => (
                   <div key={name} className="flex items-center gap-1.5 px-3 py-1 min-w-0">
-                    <TriangleAlert size={11} className="text-warning shrink-0" />
-                    <span className="text-[11px] font-mono text-warning truncate">{`{row:${name}}`}</span>
+                    <TriangleAlert size={11} className="text-warning-ink shrink-0" />
+                    <span className="text-[11px] font-mono text-warning-ink truncate">{`{row:${name}}`}</span>
                     <span
-                      className="text-[10px] text-warning ml-auto shrink-0"
+                      className="text-[10px] text-warning-ink ml-auto shrink-0"
                       data-tip={tt('An action references this column, but the table has no such header — it will type empty text.', 'Uma action referencia esta coluna, mas a tabela não tem esse cabeçalho — vai digitar texto vazio.')}
                     >
                       ×{count} · {tt('no column', 'sem coluna')}

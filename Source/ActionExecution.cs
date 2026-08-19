@@ -2399,6 +2399,16 @@ namespace TrueReplayer.Services
         private static bool ShouldResyncAfter(ActionItem action) =>
             IsLongWaitAction(action.ActionType)
             || action.RepeatCount > 1
+            // Focus click is family 3, exactly like RepeatCount: the recording held ONE click and
+            // the replay performs TWO, so the 80 ms it adds (FocusClickGapMs 60 + two
+            // MoveClickDelayMs of 10) was never inside the gap the user recorded. Measured
+            // physically 2026-08-18 on a 10-pair profile: the focus-click rows cost 106-119 ms
+            // each against 21-25 ms for a plain click (Run Report, which times only the action),
+            // 864 ms across the run -- and wall clock was IDENTICAL to the same profile without
+            // focus click, i.e. every one of those 864 ms was being eaten out of the following
+            // delays. 82 rows across 20 of the owner's real profiles; Tranquility alone lost
+            // 1.28 s per run, with the settle after "click the search box" cut from 350 to ~264.
+            || action.IsFocusClick
             || (action.ConditionTimeout > 0
                 && string.Equals(action.ActionType, "Assert", StringComparison.OrdinalIgnoreCase));
 
