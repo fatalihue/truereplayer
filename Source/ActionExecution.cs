@@ -2555,6 +2555,19 @@ namespace TrueReplayer.Services
                     bool branchTrue;
                     try { branchTrue = await EvaluateConditionWithTimeout(action, token); }
                     catch (OperationCanceledException) { ifRec.Status = "skipped"; ifWatch.Stop(); ifRec.DurationMs = ifWatch.ElapsedMilliseconds; break; }
+                    catch (Exception ex)
+                    {
+                        // Reachable: a probe error under IfOnProbeError == "Halt" rethrows out of
+                        // InstantProbeAsync (the TreatAsFalse policy swallows it instead). Without
+                        // this the row would stay "running" and read as in-flight when it actually
+                        // killed the run — the same lie the in-flight default was fixed to stop
+                        // telling. Rethrown untouched so the halt still halts.
+                        ifRec.Status = "failed";
+                        ifRec.ErrorMessage = ex.Message;
+                        ifWatch.Stop();
+                        ifRec.DurationMs = ifWatch.ElapsedMilliseconds;
+                        throw;
+                    }
                     ifWatch.Stop();
                     ifRec.DurationMs = ifWatch.ElapsedMilliseconds;
                     ifRec.Status = "ok";      // the PROBE ran; a false condition is an answer, not a failure

@@ -1334,7 +1334,13 @@ export function deriveHueInk(
   const usable = surfaces.filter(isParsableColor).map(toHex);
   // No surface we can reason about: keep the static index.css recipe rather than inventing one.
   if (usable.length === 0 || !isParsableColor(textPrimary)) {
-    return `color-mix(in srgb, ${isParsableColor(hueHex) ? hueHex : '#FFC107'} ${staticFallbackMix}%, ${isParsableColor(textPrimary) ? textPrimary : 'currentColor'})`;
+    // The hue passes through as authored rather than being swapped for amber when it is not a
+    // hex we can parse: color-mix() accepts named colours and hsl() perfectly well, and painting
+    // a recording indicator amber because its colour was spelled "red" would be a worse answer
+    // than either the real hue or a dropped declaration. A genuinely malformed value makes the
+    // whole declaration invalid, which is the loud failure and the one we want here.
+    const fallbackHue = typeof hueHex === 'string' && hueHex.trim() ? hueHex : '#FFC107';
+    return `color-mix(in srgb, ${fallbackHue} ${staticFallbackMix}%, ${isParsableColor(textPrimary) ? textPrimary : 'currentColor'})`;
   }
   const hue = hexToRGB(toHex(hueHex));
   const text = hexToRGB(toHex(textPrimary));
