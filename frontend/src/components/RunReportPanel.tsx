@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
-import { ListChecks, CheckCircle2, XCircle, MinusCircle, TriangleAlert, RefreshCw, Repeat } from 'lucide-react';
+import { ListChecks, CheckCircle2, CircleDashed, XCircle, MinusCircle, TriangleAlert, RefreshCw, Repeat } from 'lucide-react';
 import { useBridge } from '../bridge/BridgeContext';
 import { useTt } from '../state/LanguageContext';
 import { DialogShell } from './common/DialogShell';
@@ -51,6 +51,10 @@ const fmtMs = (ms: number) => (ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1
 function StatusIcon({ status }: { status: RunStep['status'] }) {
   if (status === 'failed') return <XCircle size={13} style={{ color: 'var(--color-recording-fg)' }} />;
   if (status === 'skipped') return <MinusCircle size={13} className="text-text-disabled" />;
+  // In flight — the step is filed on START, so this is reachable whenever the report is opened
+  // during a run. A dashed OUTLINE, not a tinted tick: the difference from a pass has to survive
+  // on the presets where hue is weakest, so it is carried by shape first and colour second.
+  if (status === 'running') return <CircleDashed size={13} className="text-text-tertiary" />;
   return <CheckCircle2 size={13} style={{ color: 'var(--color-replay-fg)' }} />;
 }
 
@@ -78,6 +82,10 @@ export function RunReportPanel({ onClose }: { onClose: () => void }) {
   const steps = useMemo(() => report?.steps ?? [], [report]);
   const stats = useMemo(() => {
     const failed = steps.filter((s) => s.status === 'failed').length;
+    // Steps filed but not finished — non-zero only while a run is in progress. Surfaced because
+    // the panel is a SNAPSHOT: without it, a report pulled mid-run is indistinguishable from a
+    // finished one that happened to stop early.
+    const running = steps.filter((s) => s.status === 'running').length;
     const total = steps.reduce((a, s) => a + s.durationMs, 0);
     // A fallback match is not a failure, but it IS the early warning that the primary selector
     // is dead — surface it at the same level as a failure count.
@@ -89,7 +97,7 @@ export function RunReportPanel({ onClose }: { onClose: () => void }) {
     // column is ambiguous on its own. More than one distinct profile here is what turns the
     // per-profile grouping on — a plain single-profile run must look exactly as it did before.
     const profiles = [...new Set(steps.map((s) => s.profile).filter(Boolean))] as string[];
-    return { failed, total, drifting, pages, profiles };
+    return { failed, running, total, drifting, pages, profiles };
   }, [steps]);
 
   return (
@@ -111,6 +119,7 @@ export function RunReportPanel({ onClose }: { onClose: () => void }) {
             {steps.length > 0
               ? `${steps.length} ${tt('steps', 'passos')} · ${fmtMs(stats.total)}` +
                 (stats.failed > 0 ? ` · ${stats.failed} ${tt('failed', 'falharam')}` : '')
+                + (stats.running > 0 ? ` · ${stats.running} ${tt('in progress', 'em andamento')}` : '')
               : ''}
           </div>
           <Button variant="secondary" onClick={() => send({ type: 'replay:reportRequest', payload: {} })}>
@@ -175,7 +184,9 @@ export function RunReportPanel({ onClose }: { onClose: () => void }) {
                       </span>
                     )}
                     <span className="ml-auto shrink-0 font-mono text-[10px] text-text-disabled">
-                      {fmtMs(s.durationMs)}
+                      {/* An in-flight step has DurationMs 0 because the stopwatch has not stopped
+                          yet. Rendering that as "0 ms" is the same lie the green tick was. */}
+                      {s.status === 'running' ? '…' : fmtMs(s.durationMs)}
                     </span>
                   </div>
 

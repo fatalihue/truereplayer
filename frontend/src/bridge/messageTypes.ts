@@ -474,7 +474,10 @@ export interface RunStep {
   profile: string;
   actionType: string;
   detail: string | null;          // selector / coords / key — never a resolved value
-  status: 'ok' | 'failed' | 'skipped';
+  /** 'running' is reachable: steps are filed when they START, so a report requested mid-run
+   *  contains the step currently executing — and, on a chain, the RunProfile row that is still
+   *  inside its sub-call. It must never render as a pass. */
+  status: 'running' | 'ok' | 'failed' | 'skipped';
   durationMs: number;
   // Browser diagnostics; null for every other action type.
   errorCode: string | null;       // ELEMENT_NOT_FOUND / HIDDEN / DISABLED / COVERED / …

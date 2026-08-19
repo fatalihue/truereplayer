@@ -1662,7 +1662,13 @@ namespace TrueReplayer.Services
             public string Profile { get; set; } = "";
             public string ActionType { get; set; } = "";
             public string? Detail { get; set; }           // selector / key / short label
-            public string Status { get; set; } = "ok";    // ok | failed | skipped
+            // running | ok | failed | skipped. Defaults to "running", NOT "ok": since 2.21.0 the
+            // record is filed BEFORE the action executes, so a report requested mid-run publishes
+            // steps that have not happened yet. Defaulting to "ok" painted those as green ticks
+            // with 0 ms — including the step that was hanging, which is the one the panel gets
+            // opened to diagnose. The finally below promotes running -> ok; every failure path
+            // writes its own status before it.
+            public string Status { get; set; } = "running";
             public long DurationMs { get; set; }
             // Browser diagnostics — null for every other action type.
             public string? ErrorCode { get; set; }        // ELEMENT_NOT_FOUND / HIDDEN / DISABLED / …
@@ -2835,6 +2841,12 @@ namespace TrueReplayer.Services
                     // through the reference the list holds, same as the Status / ErrorCode writes
                     // in the catch blocks above.
                     stepRec.DurationMs = stepWatch.ElapsedMilliseconds;
+                    // Success has no explicit write anywhere — it used to be the default. Promote
+                    // here rather than after the try: `finally` is the one place that runs on
+                    // EVERY exit, so no future `break`/`continue`/early return can leave a
+                    // finished step reading as still running. The catch blocks have already
+                    // written failed/skipped by now, so this only ever fires for a clean pass.
+                    if (stepRec.Status == "running") stepRec.Status = "ok";
                 }
 
                 // Wait-class actions legitimately consume wall time — that time is the whole
