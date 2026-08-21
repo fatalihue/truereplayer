@@ -4514,12 +4514,25 @@ namespace TrueReplayer.Services
             // No argument at all (a hand-typed "...:after" at the tail): empty delimiter, and the
             // step below lands safely past the end — the same fall-through Raw has always had.
             string delim = j < parts.Length ? parts[j] : string.Empty;
-            while (j + 1 < parts.Length && parts[j + 1].Length == 0)
+            // An empty follower is a "::" seam ONLY when something follows it. The bound is
+            // j+2, not j+1, and that one index is the whole difference between reading the
+            // grammar and guessing at it:
+            //
+            //   "after:Total:"   splits to ["after","Total",""] — ONE trailing empty. That is a
+            //                    chain that merely ENDS in a colon, which 2.22.0 read as the
+            //                    delimiter "Total" plus an inert empty modifier. No encoder can
+            //                    produce this shape for an escape, because buildModifierParts
+            //                    writes a trailing colon DOUBLED ("after:Total::"), so absorbing
+            //                    it would silently redefine chains already on disk.
+            //   "after:Total::"  splits to ["after","Total","",""] — the empty has a follower, so
+            //                    it is a real seam and the delimiter is "Total:".
+            //
+            // It also keeps this in step with ChainUsesEscapedColon's cheap reject: absorbing now
+            // ALWAYS implies two adjacent colons in the chain string, which is exactly what that
+            // detector scans for. Loosen this bound and the pin goes blind to the difference.
+            while (j + 2 < parts.Length && parts[j + 1].Length == 0)
             {
-                // An empty follower is the "::" seam. Absorb it together with whatever comes
-                // after, which is the rest of the delimiter — or nothing, when the chain ends
-                // on the escape ("after::" is a delimiter of exactly one colon).
-                delim += ":" + (j + 2 < parts.Length ? parts[j + 2] : string.Empty);
+                delim += ":" + parts[j + 2];
                 j += 2;
             }
             next = j + 1;
@@ -4645,8 +4658,21 @@ namespace TrueReplayer.Services
         /// </summary>
         internal static bool ChainUsesEscapedColon(string? modifierChain)
         {
+            if (ChainCarriesEscapedColon(modifierChain)) return true;
+            // The applier never sees the STORED chain when a bare `next` is in it: TrySplitNextModifier
+            // pulls that segment out and the REST is what gets applied. Dropping an index and
+            // re-joining can leave an inert empty segment sitting beside a split delimiter, where it
+            // reads as a "::" seam — so the chain that actually runs can carry an escape the stored
+            // one does not ("after:-:next::upper" stores no escape and applies "after:-::upper",
+            // which does). Ask the same method the engine asks, and pin on what will really run.
+            return TrySplitNextModifier(modifierChain, out var rest) && ChainCarriesEscapedColon(rest);
+        }
+
+        private static bool ChainCarriesEscapedColon(string? modifierChain)
+        {
             if (string.IsNullOrEmpty(modifierChain)) return false;
-            // Cheap reject: an escape needs at least two adjacent colons somewhere.
+            // Cheap reject: after ReadSplitDelimiter's j+2 bound, absorbing ALWAYS means two
+            // adjacent colons are present, so this can never hide a real escape.
             if (modifierChain.IndexOf("::", StringComparison.Ordinal) < 0) return false;
             var parts = modifierChain.Split(':');
             for (int i = 0; i < parts.Length;)
@@ -5596,6 +5622,17 @@ namespace TrueReplayer.Services
             }
             if (found < 0) return false;
 
+            // Rebuild EXACTLY as before — drop the one index, re-join with ':'. Tempting as it is
+            // to also drop the inert empty segments the walk landed on (removing `next` can leave
+            // one beside a split delimiter, where it now reads as a "::" seam), doing so is NOT
+            // behaviour-neutral: an empty segment is also what STOPS the modifier before it from
+            // eating its neighbour as an argument. Dropping them turned "words::1-2" — inert in
+            // every shipped version, because "" is not a span — into a live "words:1-2".
+            //
+            // The re-join CAN therefore change a chain's meaning between 2.22.0 and 2.23.0. That
+            // is handled where it belongs, in the pin: ChainUsesEscapedColon asks this method for
+            // the post-`next` chain and inspects that too, so such a profile is blocked on import
+            // by an older build instead of quietly resolving to something else.
             var kept = new List<string>(parts.Length - 1);
             for (int i = 0; i < parts.Length; i++) if (i != found) kept.Add(parts[i]);
             rest = kept.Count > 0 ? string.Join(":", kept) : null;

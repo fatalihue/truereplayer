@@ -96,6 +96,13 @@ export function ProfileSearchList({
   // DESCENDANT of the shell) is immediately clobbered by the card, leaving the user to click or
   // Tab into the search field. Same requestAnimationFrame trick the Profiles panel already uses
   // for its search box. Verified live: without it, document.activeElement was the dialog card.
+  // The seed is an OPENING value, not a live binding — held in a ref so neither effect below
+  // re-runs when the prop changes. Depending on the VALUE made this a re-focusing effect: the
+  // caller's seed can flip while the dialog is open (RunProfileDialog derives it from the
+  // eligible set, and a physical global hotkey still switches the active profile behind the
+  // modal), and the effect then yanked focus out of whatever field the user was typing in.
+  const seedRef = useRef(initialQuery);
+
   useEffect(() => {
     if (!autoFocus) return;
     const id = requestAnimationFrame(() => {
@@ -106,10 +113,10 @@ export function ProfileSearchList({
       // keystroke replaces it. Without this, typing after the pre-fill APPENDS to the profile
       // name ("SET Moon Slayer" + "REL") and the list goes empty, which would make the search
       // box worse than the blank one it replaced.
-      if (initialQuery) el.select();
+      if (seedRef.current) el.select();
     });
     return () => cancelAnimationFrame(id);
-  }, [autoFocus, initialQuery]);
+  }, [autoFocus]);
 
   // Height lock — the list box keeps whatever height the UNFILTERED list gave it, so
   // typing narrows the rows without the host dialog resizing under the cursor (Run
@@ -159,12 +166,14 @@ export function ProfileSearchList({
   // exactly the resize-under-the-cursor the lock exists to prevent. Mounting UNFILTERED lets the
   // lock measure the real list, then this applies the query. Layout effects both, flushed in
   // declaration order before paint, so the unfiltered list is never actually shown.
-  const seededRef = useRef(false);
+  // Mount-only, and the empty dep array is the point: an earlier version keyed this on
+  // `initialQuery` and armed its guard only when the prop was truthy, so the ref stayed
+  // unarmed while the seed was undefined and a later undefined -> value flip still fired —
+  // overwriting a query the user had already typed, and re-selecting it so the next keystroke
+  // wiped it too. Reading the seed from a ref makes "opening value" literal.
   useLayoutEffect(() => {
-    if (seededRef.current || !initialQuery) return;
-    seededRef.current = true;   // once only — re-seeding would fight the user's own typing
-    setQuery(initialQuery);
-  }, [initialQuery]);
+    if (seedRef.current) setQuery(seedRef.current);
+  }, []);
 
   // Keep the highlighted row visible for both keyboard walking and the initial
   // "reopened on a profile that sits far down the list" case.

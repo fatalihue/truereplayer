@@ -162,10 +162,13 @@ function readSplitDelimiter(parts: string[], i: number): { delim: string; next: 
   // No argument at all (a hand-typed "...:after" at the tail): empty delimiter, and the step
   // below lands safely past the end — the same fall-through raw has always had.
   let delim = j < parts.length ? parts[j] : '';
-  while (j + 1 < parts.length && parts[j + 1].length === 0) {
-    // An empty follower is the "::" seam. Absorb it together with whatever comes after, which
-    // is the rest of the delimiter — or nothing, when the chain ends on the escape.
-    delim += ':' + (j + 2 < parts.length ? parts[j + 2] : '');
+  // An empty follower is a "::" seam ONLY when something follows it — bound j+2, not j+1.
+  // "after:Total:" is a chain that merely ENDS in a colon (delimiter "Total", plus an inert
+  // empty modifier, exactly as 2.22.0 read it); "after:Total::" is the real seam (delimiter
+  // "Total:"). buildModifierParts always DOUBLES a trailing colon, so the one-empty shape is
+  // never something this editor wrote, and absorbing it would redefine chains already on disk.
+  while (j + 2 < parts.length && parts[j + 1].length === 0) {
+    delim += ':' + parts[j + 2];
     j += 2;
   }
   return { delim, next: j + 1 };

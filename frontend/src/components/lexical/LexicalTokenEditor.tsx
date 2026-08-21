@@ -52,7 +52,7 @@ import { ClipboardChipEditContext, type ClipboardChipEditRequest } from './Token
 // ENGINE does, both live in tokenNormalize — see the "What the ENGINE calls a token" banner
 // there. They are imported rather than restated because the grid's SendTextPreview needs the
 // identical answer and a second copy of a list is how the two drifted in the first place.
-import { KNOWN_TOKEN_NAMES, splitTokenSegments } from './tokenNormalize';
+import { KNOWN_TOKEN_NAMES, splitTokenSegments, normalizeToken } from './tokenNormalize';
 
 // The TYPING grammar — narrower than what the engine resolves, on purpose. Modifier segments
 // allow digits/letters plus ',', '-' and '_' so {Random:1-10}, {Clipboard:lines:3,1,2} and
@@ -66,6 +66,9 @@ import { KNOWN_TOKEN_NAMES, splitTokenSegments } from './tokenNormalize';
 const TOKEN_REGEX = /\{[a-zA-Z]+(?::[a-zA-Z0-9,_-]+)*\}/g;
 // Non-global form for single-match .exec() — stateless, so safe to share across calls.
 const TOKEN_REGEX_SINGLE = new RegExp(TOKEN_REGEX.source);
+// Anchored, for asking "would the typing grammar have accepted this WHOLE token?" — used by the
+// load path below to keep chipping exactly what it has always chipped.
+const TOKEN_REGEX_WHOLE = new RegExp(`^${TOKEN_REGEX.source}$`);
 
 // Counts the tokens a serialized payload contains — powers the "N tokens" figure in the
 // Insert Text status strip. Asks splitTokenSegments, i.e. the engine's grammar, so the figure
@@ -144,9 +147,26 @@ interface LexicalTokenEditorProps {
 //
 // The live-typing plugin stays on TOKEN_REGEX on purpose — a half-typed token must not chip.
 function buildNodesFromText(text: string): LexicalNode[] {
-  return splitTokenSegments(text).map((seg) =>
-    seg.kind === 'token' ? $createTokenNode(seg.value) : $createTextNode(seg.value),
-  );
+  return splitTokenSegments(text).map((seg) => {
+    if (seg.kind !== 'token') return $createTextNode(seg.value);
+    // Chip when EITHER condition holds, and the pair is what keeps this purely additive:
+    //
+    //   1. The typing grammar already accepted it. Those have always chipped and have always
+    //      been head-normalised on the way in, so nothing changes for them.
+    //   2. Chipping cannot rewrite anything, i.e. the token is ALREADY in normalised form.
+    //
+    // Why (2) rather than "chip whatever splitTokenSegments found": TokenNode normalises
+    // whatever it is handed and OnChangePlugin writes the editor's serialisation straight back,
+    // so chipping a token whose normalised form DIFFERS edits a payload the user never touched —
+    // it marks an untouched action dirty, and for a token the engine cannot resolve at all
+    // ({var:Ação}, {row:First Name}: their regexes demand [A-Za-z0-9_]) it changes what the macro
+    // TYPES, because those are typed out verbatim.
+    //
+    // Tokens this app built are stored already-normalised, so the case this widening exists for —
+    // a delimiter holding a space or a colon — still comes back as a chip.
+    const safeToChip = TOKEN_REGEX_WHOLE.test(seg.value) || normalizeToken(seg.value) === seg.value;
+    return safeToChip ? $createTokenNode(seg.value) : $createTextNode(seg.value);
+  });
 }
 
 // Recursively emit one text line per list item, handling NESTED lists (a list Tab-indented inside
