@@ -32,6 +32,14 @@ interface SheetPanelProps {
    *  then calls onExited so the parent can finally null the index. */
   leaving?: boolean;
   onExited?: () => void;
+  /** One-shot X/Y override for the context-menu "Pick from screen" flow (pick FIRST,
+   *  sheet after). App owns the pick round-trip — this panel's own pick correlation is
+   *  disarmed on every actionIndex change, which is exactly the moment this flow needs
+   *  it — and hands the picked point here. It seeds the DRAFT only (Save commits,
+   *  Cancel discards, same as the in-sheet Pick button) and is consumed on arrival
+   *  via onSeedConsumed so a later open never replays a stale point. */
+  seedCoords?: { x: number; y: number } | null;
+  onSeedConsumed?: () => void;
 }
 
 // Action types organised by FAMILY — the picker only offers conversions that stay within
@@ -160,7 +168,7 @@ const TIER_META: Record<'S' | 'A' | 'B' | 'C', { color: string; label: string; l
 };
 
 
-export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: SheetPanelProps) {
+export function SheetPanel({ actionIndex, onClose, leaving = false, onExited, seedCoords, onSeedConsumed }: SheetPanelProps) {
   const { actions, profiles, activeProfile } = useAppState();
   const { send, subscribe } = useBridge();
   const tt = useTt();
@@ -424,6 +432,9 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
   // handler and cannot see the handler's locals, and reading live state there would stamp the
   // toggle's CURRENT value onto an answer about its previous one.
   const condNegateAskedRef = useRef(false);
+  // Stable identity for the seed-consumed callback so the seed effect below can call it
+  // without depending on the parent's callback identity (same rationale as the id refs).
+  const onSeedConsumedRef = useRef(onSeedConsumed);
   // Correlates a dialog:pickFile round-trip (ActivateWindow Launch "Browse…") to its result.
   const browseLaunchReqRef = useRef<string | null>(null);
   // Correlates a window:captureGeometry round-trip (ActivateWindow "Capture") to its result.
@@ -441,6 +452,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
     pickElementRequestIdRef.current = pickElementRequestId;
     windowProbeRequestIdRef.current = windowProbeRequestId;
     condRequestIdRef.current = condRequestId;
+    onSeedConsumedRef.current = onSeedConsumed;
   });
 
   // Listen for pick element result + test result from extension. Subscribed once (stable deps);
@@ -749,6 +761,28 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
       setWindowProbeRequestId(null);
     }
   }, [action]);
+
+  // Context-menu pick-first seed — declared AFTER the [action] seed above on purpose:
+  // effects run in declaration order, so on a fresh open the action's own coords land
+  // first and this override wins. Keyed on the PROP (not [action]) so it also fires
+  // when the sheet is already open on the same row — there `action` identity never
+  // changes and the big effect stays silent. Consumed immediately: the next
+  // actions:updated push re-runs the [action] seed and must not find this again.
+  useEffect(() => {
+    // The actions[actionIndex] existence check is defense-in-depth: today the index
+    // cannot go stale mid-pick (the overlay's InteractionScope suppresses every
+    // mutation vector), but this effect is the one place wrong-row coords would
+    // come out if that contract ever weakened — so it refuses rather than trusts.
+    // Refusal still CONSUMES the seed: a discarded point must not lie in wait and
+    // land on whatever row the sheet opens next.
+    if (seedCoords && actionIndex != null) {
+      if (actions[actionIndex]) {
+        setX(String(seedCoords.x));
+        setY(String(seedCoords.y));
+      }
+      onSeedConsumedRef.current?.();
+    }
+  }, [seedCoords, actionIndex, actions]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
 

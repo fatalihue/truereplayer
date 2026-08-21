@@ -131,7 +131,7 @@ function AutoCollapseOnZoom({ setSidebarCollapsed, setSettingsCollapsed, autoCol
 // mode-dependent visuals (Clicker mode glow, ActionTable replacement).
 function AppShell() {
   const { settings, buttonStates } = useAppState();
-  const { subscribe } = useBridge();
+  const { send, subscribe } = useBridge();
   const isClicker = settings.useCursorClick;
 
   // Read by the global keydown handler through a ref so the handler can stay
@@ -269,6 +269,21 @@ function AppShell() {
     setSheetActionIndex(index);
   }, []);
 
+  // Context-menu "Pick from screen": pick FIRST, sheet after. The round-trip is owned
+  // here — not by SheetPanel — because the sheet's own pick correlation is deliberately
+  // disarmed on every actionIndex change (a stale reply must not land on another row),
+  // which is exactly the transition this flow ends with. Same generic message pair the
+  // in-sheet button uses; a distinct requestId keeps the two flows from cross-talking.
+  // The picked point is handed to the sheet as a one-shot DRAFT seed (Save commits,
+  // Cancel discards — identical semantics to picking from inside the sheet).
+  const rowPickRef = useRef<{ index: number; requestId: string } | null>(null);
+  const [sheetSeedCoords, setSheetSeedCoords] = useState<{ x: number; y: number } | null>(null);
+  const handlePickCoordsForRow = useCallback((index: number) => {
+    const requestId = Math.random().toString(36).slice(2, 10);
+    rowPickRef.current = { index, requestId };
+    send({ type: 'mouse:pickPosition', payload: { requestId } });
+  }, [send]);
+
   // Set by <AutoCollapseOnZoom> (which owns the responsive auto-collapse logic — it lives
   // outside AppShell to keep the ThemeContext subscription out of the shell) and cleared by
   // the manual-toggle handlers below when the user takes ownership.
@@ -309,6 +324,21 @@ function AppShell() {
       if (msg.type === 'sheet:openIndex') {
         setSheetLeaving(false);
         setSheetActionIndex(msg.payload.index);
+      } else if (msg.type === 'mouse:positionPicked') {
+        // Context-menu pick-first reply. Correlate via the ref (the subscription is a
+        // stable one-timer); replies for the sheet's OWN pick carry a different id and
+        // fall through to its listener untouched. Esc / backend refusal arrive as
+        // cancelled — then nothing opens, matching the capture-first inserts.
+        const r = msg.payload as { requestId: string; cancelled: boolean; x?: number; y?: number };
+        const pending = rowPickRef.current;
+        if (pending && r.requestId === pending.requestId) {
+          rowPickRef.current = null;
+          if (!r.cancelled && r.x != null && r.y != null) {
+            setSheetSeedCoords({ x: r.x, y: r.y });
+            setSheetLeaving(false);
+            setSheetActionIndex(pending.index);
+          }
+        }
       }
     });
   }, [subscribe]);
@@ -351,6 +381,7 @@ function AppShell() {
             <ActionTable
               columnVisibility={columnVisibility}
               onOpenSheet={handleOpenSheet}
+              onPickCoords={handlePickCoordsForRow}
             />
           )}
           <ActionBar />
@@ -380,6 +411,8 @@ function AppShell() {
           setSheetActionIndex(null);
           setSheetLeaving(false);
         }}
+        seedCoords={sheetSeedCoords}
+        onSeedConsumed={() => setSheetSeedCoords(null)}
       />
       <Suspense fallback={null}>
         {showThemeEditor && <ThemeEditor onClose={() => setShowThemeEditor(false)} />}

@@ -409,9 +409,13 @@ interface ActionTableProps {
   // here read-only; the mutator goes to Toolbar instead. ActionTable consumes
   // only the current visibility map.
   onOpenSheet?: (index: number) => void;
+  // Context-menu "Pick from screen": App owns the pick round-trip (request, reply,
+  // sheet-open-with-seed) because the sheet's own correlation is disarmed on open.
+  // This table only says WHICH row asked.
+  onPickCoords?: (index: number) => void;
 }
 
-export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps) {
+export function ActionTable({ columnVisibility, onOpenSheet, onPickCoords }: ActionTableProps) {
   const { actions, buttonStates, activeProfile, pauseState, dataTable } = useAppState();
   // Separate context on purpose: the highlight advances once per executed action during a
   // replay, and keeping it out of AppState is what stops every useAppState() consumer
@@ -2620,6 +2624,31 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
             Edit
           </button>
 
+          {/* Pick from screen — click rows only, same gate as the sheet's own Pick button
+              (isClickHalf, DoubleClick included). Starts the SAME native pick the sheet
+              uses, but BEFORE the sheet exists: App runs the round-trip and then opens
+              the sheet with the picked point seeded into the X/Y draft — the user tweaks
+              whatever else and Saves, or Cancels and nothing was written. Esc during the
+              overlay cancels the whole thing (no sheet), like the capture-first inserts.
+              Sits right under Edit per user request. */}
+          {(() => {
+            const row = actions[contextMenu.rowIndex];
+            if (!row || !/^((?:Left|Right|Middle|Double)Click)(Down|Up)?$/.test(row.actionType ?? '')) return null;
+            return (
+              <button
+                onMouseEnter={() => setActiveSubmenu(null)}
+                onClick={() => {
+                  onPickCoords?.(contextMenu.rowIndex);
+                  closeContextMenu();
+                }}
+                className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+              >
+                <Crosshair size={13} className="text-text-tertiary" />
+                Pick from screen
+              </button>
+            );
+          })()}
+
           {/* Reset cycle position — SetVariable cycle rows only. Clears the in-memory
               cursor so the next run starts at the first list item again (editing the
               list keeps the position on purpose; this is the explicit "start over" the
@@ -2740,29 +2769,9 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
               );
             }
 
-            // Clicks: copy the coordinate pair as "x, y" for quick reuse / debugging.
-            // Paired-mode clicks are DOWN/UP pairs (LeftClickDown, LeftClickUp, …); combined
-            // mode records the unsuffixed single-click form (LeftClick, RightClick, MiddleClick).
-            // An earlier draft checked only the unsuffixed names and silently missed every
-            // paired click row; user reported "Copy Coordinates doesn't appear for clicks"
-            // because of this. The optional-suffix regex matches BOTH shapes.
-            if (/^(Left|Right|Middle)Click(Down|Up)?$/.test(row.actionType ?? '')) {
-              return (
-                <button
-                  onMouseEnter={onMouse}
-                  onClick={() => {
-                    navigator.clipboard.writeText(`${row.x ?? 0}, ${row.y ?? 0}`)
-                      .then(() => showToast(tt(`Copied ${row.x ?? 0}, ${row.y ?? 0}`, `Copiado ${row.x ?? 0}, ${row.y ?? 0}`), 'success'))
-                      .catch(() => showToast(tt('Copy failed', 'Falha ao copiar'), 'error'));
-                    closeContextMenu();
-                  }}
-                  className={cls}
-                >
-                  <Crosshair size={13} className="text-text-tertiary" />
-                  Copy Coordinates
-                </button>
-              );
-            }
+            // Clicks intentionally have no entry HERE any more: their quick slot is now
+            // "Pick from screen" up under Edit, and Copy Coordinates moved into More ▸
+            // (first item) per user request — copying is the rarer of the two gestures.
 
             // KeyDown / KeyUp intentionally have no quick-copy entry. Copying just
             // the key name (e.g. "Enter") was added in the first pass but provides
@@ -2800,9 +2809,10 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
           })()}
 
           {/* Focus click and Convert to Double/Left Click used to sit here at top level.
-              Both are click-only tools and both are rarer than Edit / Copy Coordinates /
-              Duplicate, so they moved into More ▸ to keep the top level at five entries
-              (Edit · Copy Coordinates · Duplicate · More · Delete) for click rows. */}
+              Both are click-only tools and rarer than the top-level entries, so they
+              moved into More ▸ to keep the top level at five entries for click rows
+              (Edit · Pick from screen · Duplicate · More · Delete — Copy Coordinates
+              also lives in More now, as its first item). */}
 
           {/* Duplicate */}
           <button
@@ -2832,6 +2842,32 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
             {activeSubmenu === 'more' && (
               <div ref={moreFlyout.ref} className={`absolute min-w-[210px] bg-transparent ${moreFlyout.flipX ? 'right-full' : 'left-full'} ${moreFlyout.flipY ? 'bottom-0' : 'top-0'}`} style={moreFlyout.flipX ? { paddingRight: '4px' } : { paddingLeft: '4px' }}>
                 <div className="py-1 bg-bg-card border border-border-default rounded-md shadow-lg z-[60]">
+                  {/* Copy Coordinates — click rows only, FIRST item per user request.
+                      Lived at top level in the type-specific slot until "Pick from
+                      screen" took that spot. Paired-mode clicks are DOWN/UP pairs
+                      (LeftClickDown, …); the optional-suffix regex matches both shapes
+                      — an earlier draft missed every paired row by checking only the
+                      unsuffixed names. Gated on actionType ONLY (no truthy x/y check;
+                      see the type-specific slot's note on why that gate misfired). */}
+                  {(() => {
+                    const row = actions[contextMenu.rowIndex];
+                    if (!row || !/^(Left|Right|Middle)Click(Down|Up)?$/.test(row.actionType ?? '')) return null;
+                    return (
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(`${row.x ?? 0}, ${row.y ?? 0}`)
+                            .then(() => showToast(tt(`Copied ${row.x ?? 0}, ${row.y ?? 0}`, `Copiado ${row.x ?? 0}, ${row.y ?? 0}`), 'success'))
+                            .catch(() => showToast(tt('Copy failed', 'Falha ao copiar'), 'error'));
+                          closeContextMenu();
+                        }}
+                        className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+                      >
+                        <Crosshair size={13} className="text-text-tertiary" />
+                        Copy Coordinates
+                      </button>
+                    );
+                  })()}
+
                   {/* Select Similar */}
                   <button
                     onClick={() => {
