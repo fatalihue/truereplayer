@@ -133,25 +133,20 @@ interface LexicalTokenEditorProps {
 // Splits `text` into alternating plain TextNodes and TokenNodes. Unknown tokens
 // (matching the syntax but not in KNOWN_TOKEN_NAMES) stay folded into the
 // surrounding text run so the user sees their typo as plain text.
+//
+// Asks splitTokenSegments — the ENGINE's grammar — not the TYPING grammar above, because this
+// loads a FINISHED payload: reopening a saved action, or pasting one. That is the same rule the
+// token count and the grid preview already follow (see the banner on TOKEN_REGEX), and leaving
+// this one site on the narrow regex is what made a chip built through the popover come back as
+// RAW TEXT the next time the editor opened — the grid kept drawing it, the engine kept running
+// it, and only the editor forgot what it was. Any delimiter the typing grammar rejects hit this:
+// {clipboard:after: - } since 2.20.0, {clipboard:after: :: } since the colon escape.
+//
+// The live-typing plugin stays on TOKEN_REGEX on purpose — a half-typed token must not chip.
 function buildNodesFromText(text: string): LexicalNode[] {
-  const nodes: LexicalNode[] = [];
-  const regex = new RegExp(TOKEN_REGEX.source, 'g');
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-  while ((match = regex.exec(text)) !== null) {
-    const inner = match[0].slice(1, -1);
-    const name = inner.split(':')[0].toLowerCase();
-    if (!KNOWN_TOKEN_NAMES.has(name)) continue; // unknown — leave as text
-    if (match.index > lastIndex) {
-      nodes.push($createTextNode(text.slice(lastIndex, match.index)));
-    }
-    nodes.push($createTokenNode(match[0]));
-    lastIndex = regex.lastIndex;
-  }
-  if (lastIndex < text.length) {
-    nodes.push($createTextNode(text.slice(lastIndex)));
-  }
-  return nodes;
+  return splitTokenSegments(text).map((seg) =>
+    seg.kind === 'token' ? $createTokenNode(seg.value) : $createTextNode(seg.value),
+  );
 }
 
 // Recursively emit one text line per list item, handling NESTED lists (a list Tab-indented inside
