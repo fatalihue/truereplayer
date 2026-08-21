@@ -4454,18 +4454,19 @@ namespace TrueReplayer.Services
         }
 
         /// <summary>
-        /// How many segments a modifier eats, and how it decides. This is THE arity rule: four
+        /// How many segments a modifier eats, and how it decides. This is THE arity rule: five
         /// walks step through a chain (the applier, <see cref="TrySplitNextModifier"/>,
-        /// <see cref="ChainUsesTokenArg"/>, <see cref="ChainUsesAnyOf"/>) and every one of them
-        /// must agree segment-for-segment, or a chain means one thing to the engine and another
-        /// to the version pin.
+        /// <see cref="ChainUsesTokenArg"/>, <see cref="ChainUsesAnyOf"/>,
+        /// <see cref="ChainCarriesEscapedColon"/>) and every one of them must agree
+        /// segment-for-segment, or a chain means one thing to the engine and another to the
+        /// version pin.
         /// </summary>
         private enum ModifierArg
         {
             None,       // takes no argument
             Raw,        // `join` — eats the next segment whatever it says, even a modifier name
-            RawSplit,   // the split family — like Raw, but "::" inside the argument is one literal
-                        // ':', so the argument can span several segments (see ReadSplitDelimiter)
+            RawSplit,   // the split family + dropnum — like Raw, but "::" inside the argument is
+                        // one literal ':', so it can span several segments (see ReadSplitDelimiter)
             Count1,     // line/word — a 1-based index
             Count0,     // first/last — a length
             Span,       // range/words — "a-b", either side optional ("6-", "-5")
@@ -4484,7 +4485,7 @@ namespace TrueReplayer.Services
             // and its "::" is spoken for. The split family never emits an empty delimiter (one
             // leaves the modifier inert), so ITS "::" was free to mean an escaped colon.
             "join" => ModifierArg.Raw,
-            "before" or "after" or "beforelast" or "afterlast" => ModifierArg.RawSplit,
+            "before" or "after" or "beforelast" or "afterlast" or "dropnum" => ModifierArg.RawSplit,
             "line" or "word" => ModifierArg.Count1,
             "first" or "last" => ModifierArg.Count0,
             "range" or "words" => ModifierArg.Span,
@@ -4612,6 +4613,12 @@ namespace TrueReplayer.Services
         private static readonly HashSet<string> ListModifierNames = new(StringComparer.OrdinalIgnoreCase)
             { "range", "lines", "sort", "dedupe", "reverse", "join" };
 
+        // NOT folded into SliceModifierNames: that set is wired to the 2.20.0 pin, and a 2.20.0
+        // build has no dropnum — sharing the set would let a dropnum profile import where the
+        // modifier silently does nothing.
+        private static readonly HashSet<string> DropNumModifierNames = new(StringComparer.OrdinalIgnoreCase)
+            { "dropnum" };
+
         /// <summary>
         /// True when the chain uses a modifier the walk LANDS on — never one it steps over as
         /// somebody's argument. Both pins below delegate here for the reason the {clipboard:next}
@@ -4644,6 +4651,10 @@ namespace TrueReplayer.Services
         /// <summary>The list modifiers, which shipped in 2.8.0 and were never pinned.</summary>
         internal static bool ChainUsesListModifier(string? modifierChain)
             => ChainUsesAnyOf(modifierChain, ListModifierNames, openSpanCounts: false);
+
+        /// <summary>The `dropnum` modifier (drop a leading digit run + suffix), for its own pin.</summary>
+        internal static bool ChainUsesDropNum(string? modifierChain)
+            => ChainUsesAnyOf(modifierChain, DropNumModifierNames, openSpanCounts: false);
 
         /// <summary>
         /// True when a split-family delimiter carries an escaped colon ("after: :: "). Asked by the
@@ -4782,12 +4793,50 @@ namespace TrueReplayer.Services
                             // An empty delimiter is not a cut point — leave the content untouched.
                             // That is "you didn't ask for anything", not "what you asked for is
                             // missing", so it degrades to inert rather than to empty. Reachable
-                            // only by hand now: a bare trailing "after", since "after::" spells
-                            // a one-colon delimiter and the editor never emits an empty one.
+                            // only by hand now: a bare trailing "after" or a hand-typed "after::"
+                            // (a one-colon delimiter is spelled "after:::"), and the editor never
+                            // emits an empty one.
 
                             // Steps over the whole delimiter however many segments it took,
                             // landing safely past-the-end when there was no argument at all.
                             i = afterDelim;
+                        }
+                        break;
+                    // ── Drop count — strip a leading "<digits><suffix>" when present ────────
+                    // dropnum:X removes a run of ASCII digits plus X from the very START of the
+                    // content ("1x Caixa" → "Caixa" for X = "x "), and leaves it alone otherwise.
+                    // Same RawSplit argument shape as the split family: freeform, consumed
+                    // unconditionally, "::" is a literal colon.
+                    case "dropnum":
+                        {
+                            string suffix = ReadSplitDelimiter(parts, i, out int afterSuffix);
+                            // Empty suffix = inert, and that is CONTRACT, not a corner case: it is
+                            // the property that keeps "::" free to mean an escaped colon in this
+                            // arm (the same reason the split family could take the escape and
+                            // `join` could not). Redefining empty as, say, "digits only" would
+                            // recreate exactly the join collision.
+                            if (suffix.Length > 0)
+                            {
+                                // ASCII '0'–'9' on purpose, never char.IsDigit: the TS preview
+                                // matches /^[0-9]+/, and a Unicode-aware run here would strip
+                                // digits the preview shows surviving. Same ASCII-only intent as
+                                // the `lines` gate in StepModifier.
+                                int d = 0;
+                                while (d < result.Length && result[d] >= '0' && result[d] <= '9') d++;
+                                // Fail-OPEN — no prefix, no change. The opposite of the split
+                                // family's fail-closed rule ON PURPOSE, not an oversight to fix:
+                                // there "absent" is a failed SEARCH, and yielding the whole
+                                // content would paste a clipboard where the author meant a
+                                // fragment. Here "absent" is a fact about POSITION — the content
+                                // simply doesn't start with a count — and the author asked to
+                                // normalize, not to extract. Untouched IS the correct answer.
+                                if (d > 0
+                                    && d + suffix.Length <= result.Length
+                                    && string.Compare(result, d, suffix, 0, suffix.Length,
+                                                      StringComparison.OrdinalIgnoreCase) == 0)
+                                    result = result[(d + suffix.Length)..];
+                            }
+                            i = afterSuffix;
                         }
                         break;
                     // The four int-argument modifiers share one shape: read the arg (literal or

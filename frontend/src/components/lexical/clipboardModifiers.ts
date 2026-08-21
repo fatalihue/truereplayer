@@ -139,7 +139,7 @@ const argOf = (modifier: string): ArgKind => {
     // spoken for. The split family never emits an empty delimiter (one leaves the modifier
     // inert), so ITS "::" was free to mean an escaped colon. Mirror of the backend's ArgOf.
     case 'join': return 'raw';
-    case 'before': case 'after': case 'beforelast': case 'afterlast': return 'rawsplit';
+    case 'before': case 'after': case 'beforelast': case 'afterlast': case 'dropnum': return 'rawsplit';
     case 'line': case 'word': return 'count1';
     case 'first': case 'last': return 'count0';
     case 'range': case 'words': return 'span';
@@ -251,6 +251,10 @@ export interface TransformState {
   split: Split;
   splitDelim: string;
   splitLast: boolean;      // cut at the LAST occurrence (beforelast/afterlast)
+  // dropnum:X — strip a leading ASCII digit run + X from the START of the content when present,
+  // pass through untouched otherwise (fail-open, unlike the split family). Literal text like
+  // splitDelim (never escaped in state); empty = the modifier is off and nothing is emitted.
+  dropNumSuffix: string;
   extract: Extract;
   extractN: number;
   // extract === 'words' — the span of words a..b. null on either side = open end
@@ -296,6 +300,7 @@ export const DEFAULT_TRANSFORM: TransformState = {
   split: 'none',
   splitDelim: '',
   splitLast: false,
+  dropNumSuffix: '',
   extract: 'none',
   extractN: 1,
   wordsFrom: 1,
@@ -349,10 +354,13 @@ function buildModifierParts(s: TransformState): string[] {
   if (s.split !== 'none' && s.splitDelim.length > 0) {
     // A colon in the delimiter is doubled: the array below is flattened with .join(':'), so an
     // "::" survives the flattening and readSplitDelimiter stitches it back on the way in. This
-    // is the ONLY place that escapes — state.splitDelim always holds the literal delimiter, so
-    // the preview and the input field never see the escaped form.
+    // and the dropnum suffix below are the ONLY places that escape — state always holds the
+    // literal text, so the preview and the input fields never see the escaped form.
     parts.push(s.split + (s.splitLast ? 'last' : ''), s.splitDelim.replace(/:/g, '::'));
   }
+  // Same RawSplit shape and the same inert-when-empty gate as the split above — an empty suffix
+  // is never emitted, which is exactly what keeps "::" free to mean an escaped colon here.
+  if (s.dropNumSuffix.length > 0) parts.push('dropnum', s.dropNumSuffix.replace(/:/g, '::'));
   if (s.listPick === 'range') {
     const arg = spanText(s.rangeFrom, s.rangeTo);
     // Both ends open carries no bound; the backend would read the bare "-" as a non-argument
@@ -467,6 +475,17 @@ export function applyTransformPreview(raw: string, s: TransformState): string {
     // Delimiter absent → empty, never the whole content (the backend's fail-closed rule).
     if (at < 0) r = '';
     else r = s.split === 'before' ? r.slice(0, at) : r.slice(at + s.splitDelim.length);
+  }
+  if (s.dropNumSuffix.length > 0) {
+    // dropnum is fail-OPEN, deliberately unlike the split above: no leading "<digits><suffix>",
+    // no change. ASCII [0-9] on purpose — the backend walks '0'..'9', and \p{Nd} here would show
+    // a strip the runtime never performs.
+    const m = /^[0-9]+/.exec(r);
+    if (m) {
+      const d = m[0].length;
+      if (r.slice(d, d + s.dropNumSuffix.length).toLowerCase() === s.dropNumSuffix.toLowerCase())
+        r = r.slice(d + s.dropNumSuffix.length);
+    }
   }
   // null = the builder emits no `range` at all (both ends open), so the preview must skip the
   // step too — it used to run it, and silently reported CRLF-normalised text for a token that
@@ -835,6 +854,14 @@ function parseModifierParts(parts: string[], from: number): TransformState {
         state.split = p.startsWith('before') ? 'before' : 'after';
         state.splitLast = p.endsWith('last');
         state.splitDelim = readSplitDelimiter(parts, i).delim;
+        break;
+      case 'dropnum':
+        // Same raw arity as the split family: the suffix is read via readSplitDelimiter (never
+        // the `arg` above — that is undefined once a "::" seam makes the argument span segments)
+        // and re-emitted verbatim, so it round-trips byte-for-byte. A second dropnum in one chain
+        // overwrites this slot and assertRebuildable sends the chip read-only, exactly like a
+        // second split verb does.
+        state.dropNumSuffix = readSplitDelimiter(parts, i).delim;
         break;
       case 'lines':
         // Same reference treatment as range. The spec is re-emitted VERBATIM, so anything the

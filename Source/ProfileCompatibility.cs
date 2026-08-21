@@ -204,6 +204,15 @@ namespace TrueReplayer.Services
             (p => p.Actions.Any(UsesEscapedColonDelimiter),
                 new Version(2, 23, 0), "Colon in split delimiter"),
 
+            // The `dropnum` modifier ({clipboard:after: - :dropnum:x } — strip a leading digit
+            // run + suffix when present, pass through untouched otherwise). An older build skips
+            // the unknown name AND its suffix argument through the silent default, so it pastes
+            // WITH the count still attached — and because dropnum is fail-open, the no-prefix
+            // case produces identical output on both builds, hiding the divergence until the
+            // one paste where it matters. Same silent class as {clipboard:next} above.
+            (p => p.Actions.Any(UsesDropNumModifier),
+                new Version(2, 24, 0), "Drop count modifier"),
+
             // A modifier chain on {clip:name} / {var:name} / {winclip:N}. Those heads carried no
             // chain before 2.20.0, so an older build's regex does not match the token at all and
             // types it out verbatim — the literal-token failure class of the winclip and
@@ -631,6 +640,26 @@ namespace TrueReplayer.Services
             if (string.IsNullOrEmpty(text) || text.IndexOf('{') < 0) return false;
             foreach (var chain in ModifierChainsIn(text))
                 if (ActionReplayer.ChainUsesSliceModifier(chain)) return true;
+            return false;
+        }
+
+        // ── The `dropnum` modifier — strip a leading digit run + suffix ─────────────────────
+        private static bool UsesDropNumModifier(ActionItem a) =>
+            (KeyResolvingActionTypes.Contains(a.ActionType) && ContainsDropNumModifier(a.Key)) ||
+            ContainsDropNumModifier(a.KeyHtml) ||
+            ContainsDropNumModifier(a.KeyMarkdown) ||
+            (BrowserTextResolvingActionTypes.Contains(a.ActionType) && ContainsDropNumModifier(a.BrowserText)) ||
+            ContainsDropNumModifier(a.VariableValue) ||
+            ContainsDropNumModifier(a.ConditionOperand) ||
+            ContainsDropNumModifier(a.FilePath) ||
+            ContainsDropNumModifier(a.LaunchPath) ||
+            ContainsDropNumModifier(a.LaunchArgs);
+
+        private static bool ContainsDropNumModifier(string? text)
+        {
+            if (string.IsNullOrEmpty(text) || text.IndexOf('{') < 0) return false;
+            foreach (var chain in ModifierChainsIn(text))
+                if (ActionReplayer.ChainUsesDropNum(chain)) return true;
             return false;
         }
 

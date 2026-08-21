@@ -222,6 +222,25 @@ export function ClipboardModifierBody({
         </div>
       </Section>
 
+      {/* Strip a leading "<digits><suffix>" — runs right after the split in the emitted chain.
+          Filled = on, empty = off, the same rule the split delimiter follows. */}
+      <Section label="Drop count">
+        <div className="flex items-center gap-2 py-0.5">
+          <input
+            type="text"
+            value={state.dropNumSuffix}
+            onChange={(e) => setState((s) => ({ ...s, dropNumSuffix: e.target.value.replace(/[{}]/g, '') }))}
+            placeholder="x "
+            aria-label="Count suffix"
+            data-tip={tt(
+              'Strips a leading run of digits plus this text (e.g. "1x ") from the start; otherwise the text passes through unchanged. Spaces and colons are fine; { } end the token itself and are removed.',
+              'Remove uma sequência inicial de dígitos mais este texto (ex.: "1x ") do começo; senão o texto passa intacto. Espaços e dois-pontos podem; { } encerram o próprio token e são removidos.',
+            )}
+            className="h-7 w-[104px] px-1.5 text-xs font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid disabled:opacity-50"
+          />
+        </div>
+      </Section>
+
       <Section label="Extract">
         <RadioGroup label="Extract">
           <RadioRow

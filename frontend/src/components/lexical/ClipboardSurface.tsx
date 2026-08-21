@@ -180,6 +180,9 @@ export function ClipboardSurface({ state, onStateChange, head, onHeadChange, onB
   // the step is doing work.
   const splitActive = state.split !== 'none' && state.splitDelim.length > 0;
 
+  // Same rule for dropnum: an empty suffix is never emitted, so the badge stays dark.
+  const dropNumActive = state.dropNumSuffix.length > 0;
+
   // `next` is clipboard-only: the other heads have no cursor, so offering the control would
   // promise a behaviour their runtime never performs (the same rule ClipboardModifierBody's
   // `showNext` encodes). The ladder then has to RENUMBER rather than start at 2 — the numbers
@@ -390,7 +393,37 @@ export function ClipboardSurface({ state, onStateChange, head, onHeadChange, onB
             </div>
           </Step>
 
-          <Step n={sn(4)} title="Lines" active={linesActive}>
+          <Step n={sn(4)} title="Drop count" active={dropNumActive}>
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <input
+                  type="text"
+                  value={state.dropNumSuffix}
+                  onChange={(e) => set({ dropNumSuffix: e.target.value.replace(/[{}]/g, '') })}
+                  placeholder="x "
+                  aria-label="Count suffix"
+                  data-tip={tt(
+                    'Strips a leading run of digits plus this text (e.g. "1x ") from the start. Spaces and colons are fine; { } end the token itself and are removed.',
+                    'Remove uma sequência inicial de dígitos mais este texto (ex.: "1x ") do começo. Espaços e dois-pontos podem; { } encerram o próprio token e são removidos.',
+                  )}
+                  className="h-8 w-28 px-2 text-xs font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid placeholder:text-text-disabled"
+                />
+              </div>
+              <div className="text-[11px] text-text-tertiary leading-snug">
+                {state.dropNumSuffix.length === 0
+                  ? tt(
+                      'Off: leave empty to keep any leading count.',
+                      'Desligado: deixe vazio para manter qualquer quantidade inicial.',
+                    )
+                  : tt(
+                      'Only strips when the text STARTS with digits followed by this exact suffix — otherwise it passes through unchanged. "1x Caixa" → "Caixa"; "Caixa" stays "Caixa".',
+                      'Só remove quando o texto COMEÇA com dígitos seguidos deste sufixo exato — senão passa intacto. "1x Caixa" → "Caixa"; "Caixa" continua "Caixa".',
+                    )}
+              </div>
+            </div>
+          </Step>
+
+          <Step n={sn(5)} title="Lines" active={linesActive}>
             <div className="space-y-2">
               <div className="flex items-center gap-2 flex-wrap">
                 <SegmentedControl<ListPick>
@@ -468,7 +501,7 @@ export function ClipboardSurface({ state, onStateChange, head, onHeadChange, onB
             </div>
           </Step>
 
-          <Step n={sn(5)} title="Extract" active={state.extract !== 'none'}>
+          <Step n={sn(6)} title="Extract" active={state.extract !== 'none'}>
             <div className="flex items-center gap-2 flex-wrap">
               <SegmentedControl<Extract>
                 ariaLabel="Extract"
@@ -526,7 +559,7 @@ export function ClipboardSurface({ state, onStateChange, head, onHeadChange, onB
             </div>
           </Step>
 
-          <Step n={sn(6)} title="Limit length" active={state.limit !== 'none'}>
+          <Step n={sn(7)} title="Limit length" active={state.limit !== 'none'}>
             <div className="flex items-center gap-2 flex-wrap">
               <SegmentedControl<Limit>
                 ariaLabel="Limit length"
@@ -552,7 +585,7 @@ export function ClipboardSurface({ state, onStateChange, head, onHeadChange, onB
             </div>
           </Step>
 
-          <Step n={sn(7)} title="Case" active={state.case !== 'none'}>
+          <Step n={sn(8)} title="Case" active={state.case !== 'none'}>
             {/* Wrap like Steps 2-4 so the block-level SegmentedControl track hugs its
                 buttons instead of stretching to the full config-column width (which left
                 a wide empty pill after the last "Title" segment). */}
