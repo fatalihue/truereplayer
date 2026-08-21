@@ -10,6 +10,10 @@ export interface ProfileSearchListProps {
   onChange: (name: string) => void;
   /** Focus the search field on mount (both current call sites want this). */
   autoFocus?: boolean;
+  /** Pre-fill the search box so the list opens already narrowed — Run Profile seeds the
+   *  profile that was dropped, so the row is visible instead of buried in ~80 names.
+   *  Treated as a SUGGESTION: it is selected on autoFocus, so the first keystroke replaces it. */
+  initialQuery?: string;
   /** Esc inside the search field. Omit to let Esc bubble (dialogs close on it). */
   onCancel?: () => void;
   placeholder?: string;
@@ -41,6 +45,7 @@ export function ProfileSearchList({
   value,
   onChange,
   autoFocus = false,
+  initialQuery,
   onCancel,
   placeholder,
   listMaxHeightClass = 'max-h-[190px]',
@@ -93,9 +98,18 @@ export function ProfileSearchList({
   // for its search box. Verified live: without it, document.activeElement was the dialog card.
   useEffect(() => {
     if (!autoFocus) return;
-    const id = requestAnimationFrame(() => inputRef.current?.focus());
+    const id = requestAnimationFrame(() => {
+      const el = inputRef.current;
+      if (!el) return;
+      el.focus();
+      // A SEEDED query is a suggestion, not something the user typed — select it so the first
+      // keystroke replaces it. Without this, typing after the pre-fill APPENDS to the profile
+      // name ("SET Moon Slayer" + "REL") and the list goes empty, which would make the search
+      // box worse than the blank one it replaced.
+      if (initialQuery) el.select();
+    });
     return () => cancelAnimationFrame(id);
-  }, [autoFocus]);
+  }, [autoFocus, initialQuery]);
 
   // Height lock — the list box keeps whatever height the UNFILTERED list gave it, so
   // typing narrows the rows without the host dialog resizing under the cursor (Run
@@ -136,6 +150,21 @@ export function ProfileSearchList({
     el.style.height = pinned;
     setLockedHeight(natural);
   }, [query, profileCount]);
+
+  // Seeding runs AFTER the height lock, and in a LAYOUT effect, and both details are load-bearing.
+  //
+  // Passing `initialQuery` straight to useState looks equivalent and collapses the box: the lock
+  // above bails on `if (query) return`, so with a query present from the very first render it
+  // never measures, `lockedHeight` stays null, and the list shrinks to the one matching row —
+  // exactly the resize-under-the-cursor the lock exists to prevent. Mounting UNFILTERED lets the
+  // lock measure the real list, then this applies the query. Layout effects both, flushed in
+  // declaration order before paint, so the unfiltered list is never actually shown.
+  const seededRef = useRef(false);
+  useLayoutEffect(() => {
+    if (seededRef.current || !initialQuery) return;
+    seededRef.current = true;   // once only — re-seeding would fight the user's own typing
+    setQuery(initialQuery);
+  }, [initialQuery]);
 
   // Keep the highlighted row visible for both keyboard walking and the initial
   // "reopened on a profile that sits far down the list" case.

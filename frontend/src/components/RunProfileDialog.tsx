@@ -42,6 +42,21 @@ export function RunProfileDialog({ initial, excludeProfileName, onConfirm, onClo
     });
   }, [profiles, excludeProfileName, initial?.profileName]);
 
+  // Seed the picker's search box with the profile this dialog opened on, so the target is
+  // READ as well as selected: dragging a profile onto the grid used to open a full list of
+  // ~80 names with the dropped one highlighted somewhere inside it, which is a scroll away
+  // from telling the user which profile they just dropped.
+  //
+  // Guarded on the name actually being in the list. A stored target that has since been
+  // deleted is not eligible, and seeding it would pre-filter the picker down to NOTHING —
+  // strictly worse than the unfiltered list, and for the one case where the user most needs
+  // to pick a replacement.
+  const seedQuery = useMemo(() => {
+    const name = initial?.profileName;
+    if (!name) return undefined;
+    return eligibleProfiles.some((p) => p.name === name) ? name : undefined;
+  }, [initial?.profileName, eligibleProfiles]);
+
   // Pre-select the first eligible profile if none chosen yet.
   useEffect(() => {
     if (!profileName && eligibleProfiles.length > 0) {
@@ -110,6 +125,7 @@ export function RunProfileDialog({ initial, excludeProfileName, onConfirm, onClo
                 value={profileName || null}
                 onChange={setProfileName}
                 autoFocus
+                initialQuery={seedQuery}
                 ariaLabel={tt('Profile to run', 'Profile a executar')}
               />
             </div>
