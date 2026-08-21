@@ -2477,6 +2477,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
 
       {runProfileEdit && (
         <RunProfileDialog
+          mode="edit"
           initial={{ profileName: runProfileEdit.profileName, repeatCount: runProfileEdit.repeatCount, runOverData: runProfileEdit.runOverData }}
           excludeProfileName={activeProfile ?? undefined}
           onConfirm={(profileName, repeatCount, runOverData) => {
@@ -2492,6 +2493,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
           removed, but drag-to-insert still uses this. */}
       {runProfileInsert && (
         <RunProfileDialog
+          mode="add"
           excludeProfileName={activeProfile ?? undefined}
           initial={runProfileInsert.profileName ? { profileName: runProfileInsert.profileName, repeatCount: 1 } : undefined}
           onConfirm={(profileName, repeatCount, runOverData) => {

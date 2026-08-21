@@ -984,6 +984,7 @@ export function Toolbar(_props: ToolbarProps) {
 
       {showRunProfileDialog && (
         <RunProfileDialog
+          mode="add"
           excludeProfileName={activeProfile ?? undefined}
           onConfirm={(profileName, repeatCount, runOverData) => {
             const sel = selectionRef.current;

@@ -8,7 +8,14 @@ import { Button } from './common/Button';
 import { ProfileSearchList } from './common/ProfileSearchList';
 
 export interface RunProfileDialogProps {
-  /** When set, the dialog is in edit mode for this existing action. */
+  /** What the dialog is DOING — drives the title and the confirm label. Required, and
+   *  deliberately not derived from `initial`: drag-to-insert passes `initial` purely to
+   *  pre-fill the dropped profile, and inferring intent from that data made the insert
+   *  dialog announce itself as "Edit Run Profile" with a "Save" button. */
+  mode: 'add' | 'edit';
+  /** Values to open on. Pre-fills the picker and the repeat count; on `add` it is the
+   *  profile the user just dropped, on `edit` it is what the action stores. NOT a mode
+   *  signal — see `mode`. */
   initial?: { profileName: string; repeatCount: number; runOverData?: boolean };
   /** Name of the profile that will own the action. Used to filter self-reference. */
   excludeProfileName?: string;
@@ -17,13 +24,13 @@ export interface RunProfileDialogProps {
 }
 
 /**
- * Dialog used by both "Add Run Profile" (from Add Actions menu) and
- * "Edit Run Profile" (double-click on an existing RunProfile row).
+ * Dialog used by "Add Run Profile" (from the Add Actions menu, and from dragging a profile
+ * onto the grid) and by "Edit Run Profile" (double-click on an existing RunProfile row).
  *
  * Shows a profile dropdown (filtered to exclude self-references) and a
  * numeric repeat count. Validates non-empty selection before confirming.
  */
-export function RunProfileDialog({ initial, excludeProfileName, onConfirm, onClose }: RunProfileDialogProps) {
+export function RunProfileDialog({ mode, initial, excludeProfileName, onConfirm, onClose }: RunProfileDialogProps) {
   const { profiles } = useAppState();
   const tt = useTt();
   const [profileName, setProfileName] = useState(initial?.profileName ?? '');
@@ -77,7 +84,7 @@ export function RunProfileDialog({ initial, excludeProfileName, onConfirm, onClo
   return (
     <DialogShell
       icon={<Repeat2 size={14} className="shrink-0" style={{ color: 'var(--color-action-runprofile-fg)' }} />}
-      title={initial ? 'Edit Run Profile' : 'Add Run Profile'}
+      title={mode === 'edit' ? 'Edit Run Profile' : 'Add Run Profile'}
       onClose={onClose}
       // Picker dialog: the dropdown pre-selects a value and the repeat count is a
       // one-keystroke tweak — a stray backdrop click discards nothing hard to redo,
@@ -88,7 +95,7 @@ export function RunProfileDialog({ initial, excludeProfileName, onConfirm, onClo
         <>
           <Button variant="secondary" onClick={onClose}>Cancel</Button>
           <Button variant="primary" onClick={handleConfirm} disabled={!canConfirm}>
-            {initial ? 'Save' : 'Add'}
+            {mode === 'edit' ? 'Save' : 'Add'}
           </Button>
         </>
       }
