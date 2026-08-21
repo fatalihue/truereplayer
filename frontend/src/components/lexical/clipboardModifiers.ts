@@ -127,12 +127,19 @@ function spanText(from: number | null, to: number | null): string | null {
   return `${from ?? ''}-${to ?? ''}`;
 }
 
-type ArgKind = 'none' | 'raw' | 'count1' | 'count0' | 'span' | 'indices';
+type ArgKind = 'none' | 'raw' | 'rawsplit' | 'count1' | 'count0' | 'span' | 'indices';
 
 const argOf = (modifier: string): ArgKind => {
   switch (modifier) {
     // Freeform-text arguments — a separator (join) or a cut point (the split family).
-    case 'join': case 'before': case 'after': case 'beforelast': case 'afterlast': return 'raw';
+    //
+    // They are NOT the same kind, and the split is not cosmetic: `join` may legitimately take an
+    // EMPTY separator, which buildModifierParts emits as an explicit empty part, so
+    // "{clipboard:join::upper}" already means "glue with nothing, then upper" and its "::" is
+    // spoken for. The split family never emits an empty delimiter (one leaves the modifier
+    // inert), so ITS "::" was free to mean an escaped colon. Mirror of the backend's ArgOf.
+    case 'join': return 'raw';
+    case 'before': case 'after': case 'beforelast': case 'afterlast': return 'rawsplit';
     case 'line': case 'word': return 'count1';
     case 'first': case 'last': return 'count0';
     case 'range': case 'words': return 'span';
@@ -140,6 +147,29 @@ const argOf = (modifier: string): ArgKind => {
     default: return 'none';
   }
 };
+
+/**
+ * Mirror of the backend's ActionReplayer.ReadSplitDelimiter: reads the delimiter of the
+ * split-family modifier at `i` and reports where the next modifier starts. "::" is ONE literal
+ * colon — the chain was split on ':' before anyone got here, so an escaped colon arrives as an
+ * EMPTY segment between the two halves and this stitches them back together.
+ *
+ * Arity comes from SHAPE alone, as everywhere else in this walk: how many segments are consumed
+ * depends on WHERE the empty segments are, never on what any of them hold.
+ */
+function readSplitDelimiter(parts: string[], i: number): { delim: string; next: number } {
+  let j = i + 1;
+  // No argument at all (a hand-typed "...:after" at the tail): empty delimiter, and the step
+  // below lands safely past the end — the same fall-through raw has always had.
+  let delim = j < parts.length ? parts[j] : '';
+  while (j + 1 < parts.length && parts[j + 1].length === 0) {
+    // An empty follower is the "::" seam. Absorb it together with whatever comes after, which
+    // is the rest of the delimiter — or nothing, when the chain ends on the escape.
+    delim += ':' + (j + 2 < parts.length ? parts[j + 2] : '');
+    j += 2;
+  }
+  return { delim, next: j + 1 };
+}
 
 /**
  * Mirror of the backend's ActionReplayer.StepModifier: advances past ONE modifier and reports
@@ -153,6 +183,10 @@ const argOf = (modifier: string): ArgKind => {
 function stepModifier(parts: string[], i: number): { next: number; argIsRef: boolean } {
   const kind = argOf(parts[i].toLowerCase());
   if (kind === 'none') return { next: i + 1, argIsRef: false };
+  // The split family owns a VARIABLE number of segments once "::" is in play, and
+  // readSplitDelimiter is the single place that decides how many — so every walk routing
+  // through here inherits the escape instead of re-deriving it.
+  if (kind === 'rawsplit') return { next: readSplitDelimiter(parts, i).next, argIsRef: false };
   if (i + 1 >= parts.length) return { next: kind === 'raw' ? i + 2 : i + 1, argIsRef: false };
 
   const arg = parts[i + 1];
@@ -182,12 +216,19 @@ function stepModifier(parts: string[], i: number): { next: number; argIsRef: boo
  * positional test sees "join immediately before it" and shields a segment that is not an
  * argument at all. Cosmetic there, but the rule has to come from the walk to stay right as
  * modifiers are added.
+ *
+ * A split delimiter can span SEVERAL segments once it carries an escaped colon, so every segment
+ * the walk consumed is shielded, not just the first. Shielding only the head would case-fold the
+ * far side of the escape — `{clipboard:after:A::B}` would come back as `A::b` — which is the very
+ * rewriting-what-the-user-typed this set exists to prevent.
  */
 export function verbatimArgIndices(parts: string[], from: number): Set<number> {
   const out = new Set<number>();
   for (let i = from; i < parts.length;) {
     const { next } = stepModifier(parts, i);
-    if (next === i + 2 && argOf(parts[i].toLowerCase()) === 'raw') out.add(i + 1);
+    const kind = argOf(parts[i].toLowerCase());
+    if (kind === 'rawsplit') for (let k = i + 1; k < next; k++) out.add(k);
+    else if (next === i + 2 && kind === 'raw') out.add(i + 1);
     i = next;
   }
   return out;
@@ -303,7 +344,11 @@ function buildModifierParts(s: TransformState): string[] {
   // so emitting the modifier would put a step in the token that does nothing. Same care the
   // `lines` spec takes about needing a digit.
   if (s.split !== 'none' && s.splitDelim.length > 0) {
-    parts.push(s.split + (s.splitLast ? 'last' : ''), s.splitDelim);
+    // A colon in the delimiter is doubled: the array below is flattened with .join(':'), so an
+    // "::" survives the flattening and readSplitDelimiter stitches it back on the way in. This
+    // is the ONLY place that escapes — state.splitDelim always holds the literal delimiter, so
+    // the preview and the input field never see the escaped form.
+    parts.push(s.split + (s.splitLast ? 'last' : ''), s.splitDelim.replace(/:/g, '::'));
   }
   if (s.listPick === 'range') {
     const arg = spanText(s.rangeFrom, s.rangeTo);
@@ -779,12 +824,14 @@ function parseModifierParts(parts: string[], from: number): TransformState {
       case 'after':
       case 'beforelast':
       case 'afterlast':
-        // Raw arity, like join: the delimiter is whatever the next segment says, read from the
-        // ORIGINAL part (the switch matched on a lowercased copy) and re-emitted verbatim, so
-        // anything the backend consumes here round-trips byte-for-byte.
+        // Raw arity, like join: the delimiter is whatever follows, read from the ORIGINAL parts
+        // (the switch matched on a lowercased copy) and re-emitted verbatim, so anything the
+        // backend consumes here round-trips byte-for-byte. Unlike join it may span several
+        // segments — "::" is one literal colon — and readSplitDelimiter is the same helper
+        // stepModifier used to decide `next`, so the state and the arity can never disagree.
         state.split = p.startsWith('before') ? 'before' : 'after';
         state.splitLast = p.endsWith('last');
-        state.splitDelim = parts[i + 1] !== undefined ? parts[i + 1] : '';
+        state.splitDelim = readSplitDelimiter(parts, i).delim;
         break;
       case 'lines':
         // Same reference treatment as range. The spec is re-emitted VERBATIM, so anything the

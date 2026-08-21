@@ -192,6 +192,18 @@ namespace TrueReplayer.Services
             (p => p.Actions.Any(UsesSliceModifier),
                 new Version(2, 20, 0), "Text-slice modifiers"),
 
+            // A colon INSIDE a split delimiter, written as the escape "::" ({clipboard:after: :: }).
+            // Before this version the split family consumed exactly ONE segment, so an older build
+            // reads only the first piece of the delimiter and cuts at the wrong place — or, where
+            // the delimiter is nothing but a colon, reads it as EMPTY, leaves the modifier inert
+            // and pastes the whole content. Same silent class as the slice pin above: the author
+            // asked for a fragment and gets something else without a word.
+            // Detection delegates to ActionReplayer.ChainUsesEscapedColon so the pin cannot
+            // disagree with the engine about which "::" is an escape — "{clipboard:join::upper}"
+            // has meant "glue with nothing" since 2.8.0 and must NOT pin.
+            (p => p.Actions.Any(UsesEscapedColonDelimiter),
+                new Version(2, 23, 0), "Colon in split delimiter"),
+
             // A modifier chain on {clip:name} / {var:name} / {winclip:N}. Those heads carried no
             // chain before 2.20.0, so an older build's regex does not match the token at all and
             // types it out verbatim — the literal-token failure class of the winclip and
@@ -619,6 +631,26 @@ namespace TrueReplayer.Services
             if (string.IsNullOrEmpty(text) || text.IndexOf('{') < 0) return false;
             foreach (var chain in ModifierChainsIn(text))
                 if (ActionReplayer.ChainUsesSliceModifier(chain)) return true;
+            return false;
+        }
+
+        // ── A colon INSIDE a split delimiter, written "::" ──────────────────────────────────
+        private static bool UsesEscapedColonDelimiter(ActionItem a) =>
+            (KeyResolvingActionTypes.Contains(a.ActionType) && ContainsEscapedColonDelimiter(a.Key)) ||
+            ContainsEscapedColonDelimiter(a.KeyHtml) ||
+            ContainsEscapedColonDelimiter(a.KeyMarkdown) ||
+            (BrowserTextResolvingActionTypes.Contains(a.ActionType) && ContainsEscapedColonDelimiter(a.BrowserText)) ||
+            ContainsEscapedColonDelimiter(a.VariableValue) ||
+            ContainsEscapedColonDelimiter(a.ConditionOperand) ||
+            ContainsEscapedColonDelimiter(a.FilePath) ||
+            ContainsEscapedColonDelimiter(a.LaunchPath) ||
+            ContainsEscapedColonDelimiter(a.LaunchArgs);
+
+        private static bool ContainsEscapedColonDelimiter(string? text)
+        {
+            if (string.IsNullOrEmpty(text) || text.IndexOf('{') < 0) return false;
+            foreach (var chain in ModifierChainsIn(text))
+                if (ActionReplayer.ChainUsesEscapedColon(chain)) return true;
             return false;
         }
 

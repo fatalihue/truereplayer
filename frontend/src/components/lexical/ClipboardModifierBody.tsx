@@ -194,16 +194,16 @@ export function ClipboardModifierBody({
           <input
             type="text"
             value={state.splitDelim}
-            // Same grammar filter as the join separator — '{', '}' and ':' would break the
-            // token apart. A SPACE is deliberately allowed: " - " is the delimiter this
-            // whole control exists for.
-            onChange={(e) => setState((s) => ({ ...s, splitDelim: e.target.value.replace(/[{}:]/g, '') }))}
+            // A SPACE is deliberately allowed: " - " is the delimiter this whole control exists
+            // for. So is a COLON — buildModifierParts doubles it into "::" on the way out. Only
+            // the braces are unrepresentable, since they end the token itself.
+            onChange={(e) => setState((s) => ({ ...s, splitDelim: e.target.value.replace(/[{}]/g, '') }))}
             disabled={state.split === 'none'}
             placeholder=" - "
             aria-label="Delimiter"
             data-tip={tt(
-              'The text to cut at. It is not kept. Missing from the content? The step yields nothing, rather than everything.',
-              'O texto onde cortar. Ele não entra no resultado. Não existir no conteúdo? O passo não devolve nada, em vez de devolver tudo.',
+              'The text to cut at. It is not kept. Spaces and colons are fine; { } end the token itself and are removed. Missing from the content? The step yields nothing, rather than everything.',
+              'O texto onde cortar. Ele não entra no resultado. Espaços e dois-pontos podem; { } encerram o próprio token e são removidos. Não existir no conteúdo? O passo não devolve nada, em vez de devolver tudo.',
             )}
             className="h-7 w-[104px] px-1.5 text-xs font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid disabled:opacity-50"
           />
@@ -373,8 +373,7 @@ export function ClipboardModifierBody({
         </div>
         <div className="flex items-center gap-2 py-0.5">
           {/* Hand-rolled CheckRow variant: the separator input needs to sit inline,
-              and CheckRow's button spans the full row width. Separator can't contain
-              { } : (token grammar) — stripped on input. */}
+              and CheckRow's button spans the full row width. */}
           <button
             type="button"
             role="checkbox"
@@ -388,9 +387,17 @@ export function ClipboardModifierBody({
           <input
             type="text"
             value={state.joinSep}
+            // Unlike the split delimiter above, a colon CANNOT be escaped here: an empty
+            // separator is meaningful for join and is emitted as an explicit empty part, so
+            // "::" already means "glue with nothing" in tokens that exist on disk.
             onChange={(e) => setState((s) => ({ ...s, joinSep: e.target.value.replace(/[{}:]/g, '') }))}
             disabled={!state.join}
             placeholder=","
+            aria-label="Separator"
+            data-tip={tt(
+              'Separator between joined lines — empty is legal. { } : are removed: unlike the split delimiter, a colon has no escape here.',
+              'Separador entre as linhas unidas — vazio é válido. { } : são removidos: ao contrário do delimitador de corte, aqui dois-pontos não tem escape.',
+            )}
             className="h-7 w-[70px] px-1.5 text-xs font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid disabled:opacity-50"
           />
         </div>

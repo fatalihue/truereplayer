@@ -355,14 +355,16 @@ export function ClipboardSurface({ state, onStateChange, head, onHeadChange, onB
                     <input
                       type="text"
                       value={state.splitDelim}
-                      // Same grammar filter as the join separator. A SPACE is deliberately
-                      // allowed — " - " is the delimiter this control exists for.
-                      onChange={(e) => set({ splitDelim: e.target.value.replace(/[{}:]/g, '') })}
+                      // A SPACE is deliberately allowed — " - " is the delimiter this control
+                      // exists for. So is a COLON: buildModifierParts doubles it into "::" on
+                      // the way out. Only the braces are unrepresentable, since they end the
+                      // token itself.
+                      onChange={(e) => set({ splitDelim: e.target.value.replace(/[{}]/g, '') })}
                       placeholder=" - "
                       aria-label="Delimiter"
                       data-tip={tt(
-                        'The text to cut at — it is not kept. { } : are reserved by the token grammar and stripped; spaces are fine.',
-                        'O texto onde cortar — ele não entra no resultado. { } : são reservados pela gramática do token e removidos; espaços podem.',
+                        'The text to cut at — it is not kept. Spaces and colons are fine; { } end the token itself and are removed.',
+                        'O texto onde cortar — ele não entra no resultado. Espaços e dois-pontos podem; { } encerram o próprio token e são removidos.',
                       )}
                       className="h-8 w-28 px-2 text-xs font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid placeholder:text-text-disabled"
                     />
@@ -450,12 +452,15 @@ export function ClipboardSurface({ state, onStateChange, head, onHeadChange, onB
                 <input
                   type="text"
                   value={state.joinSep}
+                  // Unlike the split delimiter above, a colon CANNOT be escaped here: an empty
+                  // separator is meaningful for join and is emitted as an explicit empty part,
+                  // so "::" already means "glue with nothing" in tokens that exist on disk.
                   onChange={(e) => set({ joinSep: e.target.value.replace(/[{}:]/g, '') })}
                   disabled={!state.join}
                   placeholder=","
                   data-tip={tt(
-                    'Separator between joined lines — empty is legal. { } : are reserved by the token grammar and stripped.',
-                    'Separador entre as linhas unidas — vazio é válido. { } : são reservados pela gramática do token e removidos.',
+                    'Separator between joined lines — empty is legal. { } : are removed: unlike the split delimiter, a colon has no escape here.',
+                    'Separador entre as linhas unidas — vazio é válido. { } : são removidos: ao contrário do delimitador de corte, aqui dois-pontos não tem escape.',
                   )}
                   className="h-8 w-24 px-2 text-xs font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid disabled:opacity-50 placeholder:text-text-disabled"
                 />

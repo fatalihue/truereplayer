@@ -4454,15 +4454,18 @@ namespace TrueReplayer.Services
         }
 
         /// <summary>
-        /// How many segments a modifier eats, and how it decides. This is THE arity rule: three
+        /// How many segments a modifier eats, and how it decides. This is THE arity rule: four
         /// walks step through a chain (the applier, <see cref="TrySplitNextModifier"/>,
-        /// <see cref="ChainUsesTokenArg"/>) and every one of them must agree segment-for-segment,
-        /// or a chain means one thing to the engine and another to the version pin.
+        /// <see cref="ChainUsesTokenArg"/>, <see cref="ChainUsesAnyOf"/>) and every one of them
+        /// must agree segment-for-segment, or a chain means one thing to the engine and another
+        /// to the version pin.
         /// </summary>
         private enum ModifierArg
         {
             None,       // takes no argument
             Raw,        // `join` — eats the next segment whatever it says, even a modifier name
+            RawSplit,   // the split family — like Raw, but "::" inside the argument is one literal
+                        // ':', so the argument can span several segments (see ReadSplitDelimiter)
             Count1,     // line/word — a 1-based index
             Count0,     // first/last — a length
             Span,       // range/words — "a-b", either side optional ("6-", "-5")
@@ -4474,13 +4477,54 @@ namespace TrueReplayer.Services
             // Freeform-text arguments — a separator (join) or a cut point (the split family).
             // Consumed unconditionally, so an argument that happens to spell a modifier name
             // is still an argument.
-            "join" or "before" or "after" or "beforelast" or "afterlast" => ModifierArg.Raw,
+            //
+            // The two are NOT the same kind, and the difference is not cosmetic: `join` may
+            // legitimately take an EMPTY separator, which the editor emits as an explicit empty
+            // part, so "{clipboard:join::upper}" already means "glue with nothing, then upper"
+            // and its "::" is spoken for. The split family never emits an empty delimiter (one
+            // leaves the modifier inert), so ITS "::" was free to mean an escaped colon.
+            "join" => ModifierArg.Raw,
+            "before" or "after" or "beforelast" or "afterlast" => ModifierArg.RawSplit,
             "line" or "word" => ModifierArg.Count1,
             "first" or "last" => ModifierArg.Count0,
             "range" or "words" => ModifierArg.Span,
             "lines" => ModifierArg.Indices,
             _ => ModifierArg.None,
         };
+
+        /// <summary>
+        /// Reads the delimiter of a split-family modifier sitting at <paramref name="i"/> and
+        /// reports where the next modifier starts. "::" inside the argument is ONE literal colon:
+        /// the chain was split on ':' long before anyone got here, so an escaped colon arrives as
+        /// an EMPTY segment between the two halves, and this stitches them back together.
+        ///
+        /// The escape is confined to this family deliberately. `join` is the other freeform
+        /// argument, but an empty separator is MEANINGFUL there and the editor emits it as an
+        /// explicit empty part — "{clipboard:join::upper}" already means "glue with nothing, then
+        /// upper", so its "::" is spoken for and redefining it would change tokens that exist on
+        /// disk. Here an empty delimiter only ever left the modifier inert, and the editor refuses
+        /// to emit one at all, so "after::" was unreachable and free to mean ":".
+        ///
+        /// Arity still comes from SHAPE alone, as everywhere else in this walk: how many segments
+        /// are consumed depends on WHERE the empty segments are, never on what any of them hold.
+        /// </summary>
+        private static string ReadSplitDelimiter(string[] parts, int i, out int next)
+        {
+            int j = i + 1;
+            // No argument at all (a hand-typed "...:after" at the tail): empty delimiter, and the
+            // step below lands safely past the end — the same fall-through Raw has always had.
+            string delim = j < parts.Length ? parts[j] : string.Empty;
+            while (j + 1 < parts.Length && parts[j + 1].Length == 0)
+            {
+                // An empty follower is the "::" seam. Absorb it together with whatever comes
+                // after, which is the rest of the delimiter — or nothing, when the chain ends
+                // on the escape ("after::" is a delimiter of exactly one colon).
+                delim += ":" + (j + 2 < parts.Length ? parts[j + 2] : string.Empty);
+                j += 2;
+            }
+            next = j + 1;
+            return delim;
+        }
 
         /// <summary>
         /// Advances past ONE modifier and returns where the next one starts, reporting whether the
@@ -4504,6 +4548,14 @@ namespace TrueReplayer.Services
             argIsRef = false;
             var kind = ArgOf(parts[i].ToLowerInvariant());
             if (kind == ModifierArg.None) return i + 1;
+            // The split family owns a VARIABLE number of segments once "::" is in play, and
+            // ReadSplitDelimiter is the single place that decides how many — so every walk
+            // routing through here inherits the escape instead of re-deriving it.
+            if (kind == ModifierArg.RawSplit)
+            {
+                ReadSplitDelimiter(parts, i, out var afterSplit);
+                return afterSplit;
+            }
             // No argument left to take. `join` still steps 2 — the applier does, falling safely
             // past the end — and every other modifier degrades to argument-less.
             if (i + 1 >= parts.Length) return kind == ModifierArg.Raw ? i + 2 : i + 1;
@@ -4580,6 +4632,33 @@ namespace TrueReplayer.Services
         internal static bool ChainUsesListModifier(string? modifierChain)
             => ChainUsesAnyOf(modifierChain, ListModifierNames, openSpanCounts: false);
 
+        /// <summary>
+        /// True when a split-family delimiter carries an escaped colon ("after: :: "). Asked by the
+        /// version pin, and delegated here rather than sniffed with a regex for the reason every
+        /// other detector in this file delegates: "::" is only an escape where the WALK says a
+        /// delimiter is being read, and a "{clipboard:join::upper}" that a regex cannot tell apart
+        /// would pin a token that has meant the same thing since 2.8.0.
+        ///
+        /// Consuming more than two segments is the signature, and it is exact: ReadSplitDelimiter
+        /// steps past i+2 only when it absorbed an empty segment, which is what an escaped colon
+        /// splits into.
+        /// </summary>
+        internal static bool ChainUsesEscapedColon(string? modifierChain)
+        {
+            if (string.IsNullOrEmpty(modifierChain)) return false;
+            // Cheap reject: an escape needs at least two adjacent colons somewhere.
+            if (modifierChain.IndexOf("::", StringComparison.Ordinal) < 0) return false;
+            var parts = modifierChain.Split(':');
+            for (int i = 0; i < parts.Length;)
+            {
+                bool isSplit = ArgOf(parts[i].ToLowerInvariant()) == ModifierArg.RawSplit;
+                int next = StepModifier(parts, i, out _);
+                if (isSplit && next > i + 2) return true;
+                i = next;
+            }
+            return false;
+        }
+
         // "6-" or "-5" — a span whose missing side an older TryParseLineRange would reject.
         private static bool IsOpenSpan(string s)
         {
@@ -4649,8 +4728,11 @@ namespace TrueReplayer.Services
                         {
                             // The delimiter is freeform text, so it is consumed UNCONDITIONALLY
                             // — the join rule, for the join reason: a delimiter that happens to
-                            // spell a modifier name is still a delimiter.
-                            string delim = i + 1 < parts.Length ? parts[i + 1] : string.Empty;
+                            // spell a modifier name is still a delimiter. It may also carry a
+                            // colon of its own, written "::"; ReadSplitDelimiter owns both the
+                            // stitching and the resulting arity, so this branch and every pin
+                            // walk agree on where the modifier ends.
+                            string delim = ReadSplitDelimiter(parts, i, out int afterDelim);
                             if (delim.Length > 0)
                             {
                                 bool fromEnd = mod is "beforelast" or "afterlast";
@@ -4673,10 +4755,14 @@ namespace TrueReplayer.Services
                             }
                             // An empty delimiter is not a cut point — leave the content untouched.
                             // That is "you didn't ask for anything", not "what you asked for is
-                            // missing", so it degrades to inert rather than to empty.
+                            // missing", so it degrades to inert rather than to empty. Reachable
+                            // only by hand now: a bare trailing "after", since "after::" spells
+                            // a one-colon delimiter and the editor never emits an empty one.
+
+                            // Steps over the whole delimiter however many segments it took,
+                            // landing safely past-the-end when there was no argument at all.
+                            i = afterDelim;
                         }
-                        // Steps 2, landing safely past-the-end when there was no arg at all.
-                        i = StepModifier(parts, i, out _);
                         break;
                     // The four int-argument modifiers share one shape: read the arg (literal or
                     // "@name"), and when a REFERENCE fails to resolve, yield EMPTY rather than
