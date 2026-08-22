@@ -170,6 +170,10 @@ const VALUE_CHIPS: PaletteChip[] = [
   { label: 'Time', insert: '{time}', tip: ['Current time (HH:mm:ss)', 'Hora atual (HH:mm:ss)'] },
   { label: 'DateTime', insert: '{datetime}', tip: ['Current date and time', 'Data e hora atuais'] },
   { label: 'Random', insert: '{random:1-10}', tip: ['Fresh random number each run', 'Número aleatório novo a cada execução'] },
+  // Seed is PRE-normalized ({Pick:...}, args verbatim) — direct chips insert as text and only
+  // a normalization fixed point survives the load gate as a chip. Click the chip to edit the
+  // options one-per-line in its popover.
+  { label: 'Pick', insert: '{Pick:a|b|c}', tip: ['Types ONE of the options, chosen at random each run — click the chip to edit the list', 'Digita UMA das opções, sorteada a cada execução — clique no chip para editar a lista'] },
 ];
 
 const KEY_CHIPS: PaletteChip[] = [

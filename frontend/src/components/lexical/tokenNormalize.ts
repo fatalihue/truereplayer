@@ -33,7 +33,10 @@ const COMPOUND_NAMES: Record<string, string> = {
 // the FIRST arg stays verbatim (case-folding {var:MyVar} would rewrite the user's text on every
 // open/close, and backend lookups are case-insensitive anyway) while the segments after it are
 // clipboard-style modifiers and follow the modifier rules.
-const VERBATIM_ARG_NAMES = new Set(['input']);
+// {pick:a|b|c} joins {input} here for the same reason: its whole argument is free text (the
+// '|'-separated options, which may carry spaces, ':' and accents). Without this, the pure-alpha
+// segment fold below would rewrite the OPTIONS on every chip creation ({Pick:Sim} → {Pick:sim}).
+const VERBATIM_ARG_NAMES = new Set(['input', 'pick']);
 
 // Heads whose first argument is a user-chosen name/column, followed by an optional modifier chain.
 const NAME_FIRST_ARG_NAMES = new Set(['row', 'rownext', 'var', 'clip']);
@@ -148,6 +151,9 @@ export const KNOWN_TOKEN_NAMES: ReadonlySet<string> = new Set([
   // so those chip only via insertToken (the palette prompt); a bare {input:Name} chips when typed.
   // Both shapes are tokens to the walker below, because both resolve.
   'input',
+  // Random text choice: {pick:a|b|c} draws one '|'-separated option per use. Options are
+  // free text (VERBATIM_ARG_NAMES), so like {input} it chips via insertToken / on load.
+  'pick',
 ]);
 
 export interface TokenSegment {

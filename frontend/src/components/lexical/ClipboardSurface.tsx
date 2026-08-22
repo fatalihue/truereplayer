@@ -585,7 +585,25 @@ export function ClipboardSurface({ state, onStateChange, head, onHeadChange, onB
             </div>
           </Step>
 
-          <Step n={sn(8)} title="Case" active={state.case !== 'none'}>
+          <Step n={sn(8)} title="Clean up" active={state.noAccents || state.digitsOnly}>
+            {/* Character-class filters over the value at THIS point of the chain — the
+                builder emits them after the slice/limit steps and before Case (slice,
+                then clean, then case), which is why the step sits here in the ladder. */}
+            <div className="flex items-center gap-4 flex-wrap">
+              <CheckRow
+                checked={state.noAccents}
+                onChange={() => set({ noAccents: !state.noAccents })}
+                label="Remove accents"
+              />
+              <CheckRow
+                checked={state.digitsOnly}
+                onChange={() => set({ digitsOnly: !state.digitsOnly })}
+                label="Digits only"
+              />
+            </div>
+          </Step>
+
+          <Step n={sn(9)} title="Case" active={state.case !== 'none'}>
             {/* Wrap like Steps 2-4 so the block-level SegmentedControl track hugs its
                 buttons instead of stretching to the full config-column width (which left
                 a wide empty pill after the last "Title" segment). */}

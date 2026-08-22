@@ -49,7 +49,7 @@ const REPEATABLE_TOKEN_NAMES = new Set([
 // and in the editor's update (what a new value may become).
 const MAX_KEY_REPEAT = 100;
 
-type TokenKind = 'clipboard' | 'delay' | 'repeatable' | 'random' | 'var' | 'rowcol' | 'rownextcol' | 'clip' | 'winclip' | 'input' | 'static';
+type TokenKind = 'clipboard' | 'delay' | 'repeatable' | 'random' | 'var' | 'rowcol' | 'rownextcol' | 'clip' | 'winclip' | 'input' | 'pick' | 'static';
 
 function getTokenKind(token: string): TokenKind {
   const inner = token.slice(1, -1);
@@ -68,6 +68,8 @@ function getTokenKind(token: string): TokenKind {
   // {winclip:N} — item N of the Windows clipboard history (Win+V).
   if (name === 'winclip') return 'winclip';
   if (name === 'input') return 'input';
+  // {pick:a|b|c} — random text choice among the options.
+  if (name === 'pick') return 'pick';
   if (REPEATABLE_TOKEN_NAMES.has(name)) return 'repeatable';
   return 'static';
 }
@@ -229,7 +231,7 @@ export function TokenChipPopover({
         position: 'fixed',
         ...visibilityStyle,
         zIndex: 100,
-        width: kind === 'clipboard' || kind === 'rowcol' || kind === 'rownextcol' ? 300 : 260,
+        width: kind === 'clipboard' || kind === 'rowcol' || kind === 'rownextcol' || kind === 'pick' ? 300 : 260,
         background: 'var(--color-bg-elevated, #2d2d2d)',
         border: '1px solid color-mix(in srgb, var(--color-accent-solid) 35%, transparent)',
         boxShadow: '0 16px 40px rgba(0, 0, 0, 0.55)',
@@ -256,6 +258,7 @@ export function TokenChipPopover({
         {kind === 'clip' && <NameEditor token={token} tokenName="clip" onChange={updateLive} />}
         {kind === 'winclip' && <WinClipEditor token={token} onChange={updateLive} />}
         {kind === 'input' && <InputEditor token={token} onChange={updateLive} />}
+        {kind === 'pick' && <PickEditor token={token} onChange={updateLive} />}
         {kind === 'static' && <StaticInfo token={token} />}
       </div>
 
@@ -773,6 +776,43 @@ function InputEditor({ token, onChange }: { token: string; onChange: (t: string)
         </div>
       </Section>
     </>
+  );
+}
+
+// Editor for {pick:a|b|c} — the random-choice token. One option per LINE in the textarea; the
+// token joins them with '|' (an implementation detail the user never types). '{', '}' and '|'
+// are stripped per line: braces end the token, and a '|' inside a line would silently split it
+// into two options. Empty lines are dropped; zero non-empty options never emits (InputEditor's
+// empty-label rule — a broken {pick:} must not be written).
+function PickEditor({ token, onChange }: { token: string; onChange: (t: string) => void }) {
+  const [text, setText] = useState(() => parseNameArg(token).split('|').join('\n'));
+
+  const onEdit = (raw: string) => {
+    setText(raw);
+    const options = raw
+      .split('\n')
+      .map((l) => l.replace(/[{}|]/g, ''))
+      .filter((l) => l.length > 0);
+    if (options.length > 0) onChange(`{Pick:${options.join('|')}}`);
+  };
+
+  return (
+    <Section label="Options — one per line">
+      <div className="py-1">
+        <textarea
+          value={text}
+          onChange={(e) => onEdit(e.target.value)}
+          autoFocus
+          spellCheck={false}
+          rows={5}
+          placeholder={'Olá! Tudo bem?\nOi, como posso ajudar?\nBom dia!'}
+          className="w-full px-2 py-1.5 text-xs bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid placeholder:text-text-disabled resize-none font-mono leading-relaxed"
+        />
+      </div>
+      <div className="text-[10px] text-text-tertiary mt-1">
+        Each use picks one line at random — two uses in one text roll independently.
+      </div>
+    </Section>
   );
 }
 

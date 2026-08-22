@@ -213,6 +213,26 @@ namespace TrueReplayer.Services
             (p => p.Actions.Any(UsesDropNumModifier),
                 new Version(2, 24, 0), "Drop count modifier"),
 
+            // The text-filter modifiers ({clipboard:noaccents} strips diacritics, {clipboard:digits}
+            // keeps ASCII 0-9 only). An older build skips the unknown names through the silent
+            // default and pastes the accented / fully-formatted text where the author asked for the
+            // normalized form — the {clipboard:next} silent class. Detection delegates to the
+            // engine walk (ChainUsesTextFilter) because the names can also appear as CONSUMED
+            // arguments ("after:noaccents:x" is a delimiter, not a modifier) — a regex would
+            // over-pin those, and would miss the arg-gate divergence chains ("line:noaccents",
+            // where the old build read a failed literal gate and the new build applies the filter).
+            // Introduced after 2.24.0 — bump at release.
+            (p => p.Actions.Any(UsesTextFilterModifier),
+                new Version(2, 24, 0), "Accent/digit filter modifiers"),
+
+            // Random text-choice token {pick:a|b|c} — an older build has no PickTokenRegex, so the
+            // whole token stays literal and gets typed into the target verbatim (the winclip
+            // literal-token failure class). The ':' is mandatory in the detector, mirroring the
+            // engine regex — a bare "{pick}" is literal on BOTH builds and must not pin.
+            // Introduced after 2.24.0 — bump at release.
+            (p => p.Actions.Any(UsesPickToken),
+                new Version(2, 24, 0), "Random choice token"),
+
             // A modifier chain on {clip:name} / {var:name} / {winclip:N}. Those heads carried no
             // chain before 2.20.0, so an older build's regex does not match the token at all and
             // types it out verbatim — the literal-token failure class of the winclip and
@@ -662,6 +682,47 @@ namespace TrueReplayer.Services
                 if (ActionReplayer.ChainUsesDropNum(chain)) return true;
             return false;
         }
+
+        // ── The text-filter modifiers — noaccents / digits ──────────────────────────────────
+        private static bool UsesTextFilterModifier(ActionItem a) =>
+            (KeyResolvingActionTypes.Contains(a.ActionType) && ContainsTextFilterModifier(a.Key)) ||
+            ContainsTextFilterModifier(a.KeyHtml) ||
+            ContainsTextFilterModifier(a.KeyMarkdown) ||
+            (BrowserTextResolvingActionTypes.Contains(a.ActionType) && ContainsTextFilterModifier(a.BrowserText)) ||
+            ContainsTextFilterModifier(a.VariableValue) ||
+            ContainsTextFilterModifier(a.ConditionOperand) ||
+            ContainsTextFilterModifier(a.FilePath) ||
+            ContainsTextFilterModifier(a.LaunchPath) ||
+            ContainsTextFilterModifier(a.LaunchArgs);
+
+        private static bool ContainsTextFilterModifier(string? text)
+        {
+            if (string.IsNullOrEmpty(text) || text.IndexOf('{') < 0) return false;
+            foreach (var chain in ModifierChainsIn(text))
+                if (ActionReplayer.ChainUsesTextFilter(chain)) return true;
+            return false;
+        }
+
+        // ── Random text-choice token {pick:a|b|c} ───────────────────────────────────────────
+        // Mirrors ActionExecution.PickTokenRegex: ':' mandatory, options end at the first '}'.
+        private static readonly Regex PickTokenRegex = new(
+            @"\{pick:[^}]+\}",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        private static bool UsesPickToken(ActionItem a) =>
+            (KeyResolvingActionTypes.Contains(a.ActionType) && ContainsPickToken(a.Key)) ||
+            ContainsPickToken(a.KeyHtml) ||
+            ContainsPickToken(a.KeyMarkdown) ||
+            (BrowserTextResolvingActionTypes.Contains(a.ActionType) && ContainsPickToken(a.BrowserText)) ||
+            ContainsPickToken(a.VariableValue) ||
+            ContainsPickToken(a.ConditionOperand) ||
+            ContainsPickToken(a.FilePath) ||
+            ContainsPickToken(a.LaunchPath) ||
+            ContainsPickToken(a.LaunchArgs);
+
+        private static bool ContainsPickToken(string? text) =>
+            !string.IsNullOrEmpty(text) && text.Contains("{pick", StringComparison.OrdinalIgnoreCase)
+                && PickTokenRegex.IsMatch(text);
 
         // ── A colon INSIDE a split delimiter, written "::" ──────────────────────────────────
         private static bool UsesEscapedColonDelimiter(ActionItem a) =>

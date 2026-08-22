@@ -291,6 +291,10 @@ export interface TransformState {
   reverse: boolean;
   join: boolean;
   joinSep: string;      // '' is a legal separator (emitted as an explicit empty part)
+  // Text filters — character-class cleanup over the CURRENT value, emitted after the
+  // slice/limit steps and before the case tail (slice, then clean, then case).
+  noAccents: boolean;   // strip diacritics: NFD → drop \p{Mn} → NFC (backend algorithm, exactly)
+  digitsOnly: boolean;  // keep ASCII 0-9 only (backend walks '0'..'9'; never \p{Nd})
 }
 
 export const DEFAULT_TRANSFORM: TransformState = {
@@ -320,6 +324,8 @@ export const DEFAULT_TRANSFORM: TransformState = {
   reverse: false,
   join: false,
   joinSep: ',',
+  noAccents: false,
+  digitsOnly: false,
 };
 
 export function buildClipboardToken(s: TransformState): string {
@@ -388,6 +394,11 @@ function buildModifierParts(s: TransformState): string[] {
   const limitArg = isArgRef(s.limitRef) ? s.limitRef : String(s.limitN);
   if (s.limit === 'first') parts.push('first', limitArg);
   else if (s.limit === 'last') parts.push('last', limitArg);
+  // Canonical position: after the slice/limit steps, before the case tail — slice, then
+  // clean, then case. ({clipboard:first:3:digits} ≠ {clipboard:digits:first:3}; the builder
+  // emits only this order, and a hand-typed other order goes read-only via assertRebuildable.)
+  if (s.noAccents) parts.push('noaccents');
+  if (s.digitsOnly) parts.push('digits');
   if (s.case === 'upper') parts.push('upper');
   else if (s.case === 'lower') parts.push('lower');
   else if (s.case === 'sentence') parts.push('sentence');
@@ -454,6 +465,11 @@ export const previewIsRuntimeDependent = (s: TransformState): boolean =>
 export const argRefIsUnfinished = (s: TransformState): boolean =>
   (extractUsesRef(s) && !!s.extractRef && !isArgRef(s.extractRef)) ||
   (s.limit !== 'none' && !!s.limitRef && !isArgRef(s.limitRef));
+
+// A lone surrogate half. With the u flag the class matches UNPAIRED halves only — a proper
+// pair reads as one astral code point, outside this range. Mirror of the backend's
+// IsWellFormedUtf16 gate on noaccents (there, .NET's Normalize throws on such input).
+const hasLoneSurrogate = (t: string): boolean => /[\uD800-\uDFFF]/u.test(t);
 
 export function applyTransformPreview(raw: string, s: TransformState): string {
   let r = raw;
@@ -546,6 +562,15 @@ export function applyTransformPreview(raw: string, s: TransformState): string {
   }
   if (s.limit === 'first') r = r.slice(0, Math.max(0, s.limitN));
   else if (s.limit === 'last') r = s.limitN <= 0 ? '' : r.slice(-s.limitN);
+  // Text filters — same relative position as the builder (after slice/limit, before case).
+  // noaccents mirrors the backend algorithm exactly: NFD → strip Mn code-point-wise (astral
+  // marks like ideographic variation selectors go too — the backend classifies by code point
+  // for the same reason) → NFC. Ill-formed UTF-16 (a lone surrogate half — the first/last
+  // slices above cut by UTF-16 unit and can bisect an emoji pair) passes through UNTOUCHED:
+  // .NET's Normalize would throw there, so the backend fails open, and the preview must show
+  // what replay will actually paste. digits mirrors the ASCII walk — [0-9], never \p{Nd}.
+  if (s.noAccents && !hasLoneSurrogate(r)) r = r.normalize('NFD').replace(/\p{Mn}/gu, '').normalize('NFC');
+  if (s.digitsOnly) r = r.replace(/[^0-9]/g, '');
   if (s.case === 'upper') r = r.toUpperCase();
   else if (s.case === 'lower') r = r.toLowerCase();
   else if (s.case === 'sentence') r = r.length > 0 ? r[0].toUpperCase() + r.slice(1) : r;
@@ -878,6 +903,12 @@ function parseModifierParts(parts: string[], from: number): TransformState {
         break;
       case 'reverse':
         state.reverse = true;
+        break;
+      case 'noaccents':
+        state.noAccents = true;
+        break;
+      case 'digits':
+        state.digitsOnly = true;
         break;
       case 'join':
         // join ALWAYS owns the next part as its separator (raw, never lowercased — the switch

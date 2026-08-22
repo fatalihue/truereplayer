@@ -4619,6 +4619,12 @@ namespace TrueReplayer.Services
         private static readonly HashSet<string> DropNumModifierNames = new(StringComparer.OrdinalIgnoreCase)
             { "dropnum" };
 
+        // Same isolation rule as DropNumModifierNames: these two shipped together after 2.24.0
+        // and get their own pin — folding them into an older pinned set would let a profile
+        // using them import where the modifiers silently do nothing.
+        private static readonly HashSet<string> TextFilterModifierNames = new(StringComparer.OrdinalIgnoreCase)
+            { "noaccents", "digits" };
+
         /// <summary>
         /// True when the chain uses a modifier the walk LANDS on — never one it steps over as
         /// somebody's argument. Both pins below delegate here for the reason the {clipboard:next}
@@ -4655,6 +4661,10 @@ namespace TrueReplayer.Services
         /// <summary>The `dropnum` modifier (drop a leading digit run + suffix), for its own pin.</summary>
         internal static bool ChainUsesDropNum(string? modifierChain)
             => ChainUsesAnyOf(modifierChain, DropNumModifierNames, openSpanCounts: false);
+
+        /// <summary>The text-filter modifiers (`noaccents` / `digits`), for their own pin.</summary>
+        internal static bool ChainUsesTextFilter(string? modifierChain)
+            => ChainUsesAnyOf(modifierChain, TextFilterModifierNames, openSpanCounts: false);
 
         /// <summary>
         /// True when a split-family delimiter carries an escaped colon ("after: :: "). Asked by the
@@ -4704,6 +4714,24 @@ namespace TrueReplayer.Services
             return dash == 0 || dash == s.Length - 1;
         }
 
+        // True when every surrogate half is correctly paired. noaccents gates on this because
+        // string.Normalize THROWS on a lone half, and the applier's modifiers must stay total
+        // functions — a broken clipboard degrades, it never fails the run. The TS preview keeps
+        // the same gate (a /[\uD800-\uDFFF]/u test) so preview and replay agree on these inputs.
+        private static bool IsWellFormedUtf16(string s)
+        {
+            for (int k = 0; k < s.Length; k++)
+            {
+                if (char.IsHighSurrogate(s[k]))
+                {
+                    if (k + 1 >= s.Length || !char.IsLowSurrogate(s[k + 1])) return false;
+                    k++;
+                }
+                else if (char.IsLowSurrogate(s[k])) return false;
+            }
+            return true;
+        }
+
         /// <summary>
         /// Applies modifier chain (e.g. "trim:line:1:first:8:upper") to clipboard content.
         /// Unknown modifiers are silently ignored so that future modifiers stay forward-compatible.
@@ -4751,6 +4779,54 @@ namespace TrueReplayer.Services
                         break;
                     case "trim":
                         result = result.Trim();
+                        i++;
+                        break;
+                    case "noaccents":
+                        {
+                            // NFD → drop combining marks → NFC, the exact algorithm the TS preview
+                            // mirrors (normalize('NFD') + strip \p{Mn} + normalize('NFC')). Case is
+                            // preserved by construction — no case mapping is involved (ç→c, Ã→A).
+                            //
+                            // Gated on well-formed UTF-16 because string.Normalize THROWS on a lone
+                            // surrogate half — and those are reachable, not exotic: any app can put
+                            // ill-formed text on the clipboard, and first/last cut by UTF-16 unit,
+                            // so "first:5:noaccents" (the builder's own canonical order) manufactures
+                            // one by slicing inside an emoji pair. Unguarded, this would be the
+                            // chain's only run-killing modifier; broken input passes through
+                            // UNTOUCHED instead (dropnum's fail-open posture), and the TS preview
+                            // carries the same gate so both sides agree on exactly these inputs.
+                            if (IsWellFormedUtf16(result))
+                            {
+                                var formD = result.Normalize(System.Text.NormalizationForm.FormD);
+                                var sb = new System.Text.StringBuilder(formD.Length);
+                                for (int k = 0; k < formD.Length; k++)
+                                {
+                                    // Classify by CODE POINT, never per UTF-16 unit: the char
+                                    // overload calls both halves of an astral mark "Surrogate" and
+                                    // would keep marks the TS preview's \p{Mn} strips (ideographic
+                                    // variation selectors, Adlam marks). Pairs are intact here by
+                                    // the gate above, so k+1 is always valid after a high half.
+                                    int width = char.IsHighSurrogate(formD[k]) ? 2 : 1;
+                                    if (System.Globalization.CharUnicodeInfo.GetUnicodeCategory(formD, k)
+                                            != System.Globalization.UnicodeCategory.NonSpacingMark)
+                                        sb.Append(formD, k, width);
+                                    if (width == 2) k++;
+                                }
+                                result = sb.ToString().Normalize(System.Text.NormalizationForm.FormC);
+                            }
+                        }
+                        i++;
+                        break;
+                    case "digits":
+                        {
+                            // ASCII '0'–'9' on purpose, never char.IsDigit — it matches Unicode Nd
+                            // (e.g. full-width '１') and would diverge from the TS preview's [0-9].
+                            // Same ASCII doctrine as dropnum and the lines gate.
+                            var sb = new System.Text.StringBuilder(result.Length);
+                            foreach (var ch in result)
+                                if (ch >= '0' && ch <= '9') sb.Append(ch);
+                            result = sb.ToString();
+                        }
                         i++;
                         break;
 
@@ -5820,6 +5896,7 @@ namespace TrueReplayer.Services
             text = await ResolveWinClipTokensAsync(text, dispatcherQueue, escapeBracesInSubstitution, htmlEncodeSubstitution, flavorSync, runCtx);
             text = ResolveDateTimeTokens(text, flavorSync);
             text = ResolveRandomTokens(text, flavorSync);
+            text = ResolvePickTokens(text, escapeBracesInSubstitution, htmlEncodeSubstitution, flavorSync);
             // {input:Label} runs BEFORE run-state so a {var:Label} in the same text sees the answer
             // the prompt just stored. On the static Test-Action path runCtx.InputProvider is null →
             // resolves empty (consume-always), keeping that path byte-identical.
@@ -5908,6 +5985,8 @@ namespace TrueReplayer.Services
             public Queue<string>? RowNextReplay; // replayed on the html pass so the cursor advances once
             public List<string>? ClipNextRecord;  // {clipboard:next} resolved lines — recording (plain) pass
             public Queue<string>? ClipNextReplay; // replayed on the html pass so one paste eats one line
+            public List<string>? PickRecord;      // {pick:a|b|c} drawn options — recording (plain) pass
+            public Queue<string>? PickReplay;     // replayed on the html pass so both flavors agree
         }
 
         private static string ResolveRandomTokens(string text, TokenFlavorSync? sync = null)
@@ -5926,6 +6005,42 @@ namespace TrueReplayer.Services
                 var value = Random.Shared.NextInt64(a, b + 1).ToString();
                 sync?.RandomRecord?.Add(value);
                 return value;
+            });
+        }
+
+        // Matches {pick:a|b|c} — a uniform random choice among '|'-separated verbatim options.
+        // The argument is freeform text ending at the first '}', so options may carry spaces,
+        // ':' and accents; they can never carry '}' (token grammar) or '|' (the separator).
+        // IgnoreCase like the other token regexes (the FE chip normalizer title-cases the head).
+        private static readonly Regex PickTokenRegex = new(
+            @"\{pick:([^}]+)\}",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        // Resolves {pick:a|b|c}: each occurrence rolls independently ({random}'s contract).
+        // Empty options are dropped ("a||b" is two options); zero usable options resolve to
+        // EMPTY (consume-always). On the rich SendText double-resolve the plain pass RECORDS
+        // the chosen option (raw, pre-escaping — the winclip discipline) and the html pass
+        // REPLAYS it, so both flavors paste the same choice. Unlike {random}, the options are
+        // arbitrary text, so the substituted value gets the full {var}-style escape treatment.
+        private static string ResolvePickTokens(string text,
+            bool escapeBracesInSubstitution, bool htmlEncodeSubstitution, TokenFlavorSync? sync = null)
+        {
+            if (text.IndexOf("{pick:", StringComparison.OrdinalIgnoreCase) < 0) return text;
+            return PickTokenRegex.Replace(text, m =>
+            {
+                string raw;
+                if (sync?.PickReplay is { Count: > 0 } replay)
+                {
+                    raw = replay.Dequeue();
+                }
+                else
+                {
+                    var options = m.Groups[1].Value.Split('|').Where(o => o.Length > 0).ToArray();
+                    raw = options.Length > 0 ? options[Random.Shared.Next(options.Length)] : string.Empty;
+                    sync?.PickRecord?.Add(raw);
+                }
+                var resolved = htmlEncodeSubstitution ? HtmlEncodeValue(raw) : raw;
+                return escapeBracesInSubstitution ? EscapeBracesForParser(resolved) : resolved;
             });
         }
 
@@ -6157,7 +6272,7 @@ namespace TrueReplayer.Services
             // value so content like "{enter}" is pasted as text, not re-interpreted as a key press.
             // The flavor sync RECORDS this pass's {random} draws + DateTime.Now snapshot so the
             // html pass below replays the exact same values (one paste = one set of values).
-            var flavorSync = new TokenFlavorSync { RandomRecord = new List<string>(), WinClipRecord = new List<string>(), RowNextRecord = new List<string>(), ClipNextRecord = new List<string>() };
+            var flavorSync = new TokenFlavorSync { RandomRecord = new List<string>(), WinClipRecord = new List<string>(), RowNextRecord = new List<string>(), ClipNextRecord = new List<string>(), PickRecord = new List<string>() };
             text = await ResolveTokens(text, originalClipboard.Text ?? string.Empty, escapeBracesInSubstitution: true, flavorSync);
 
             if (string.IsNullOrEmpty(text) || token.IsCancellationRequested)
@@ -6189,6 +6304,7 @@ namespace TrueReplayer.Services
                     WinClipReplay = new Queue<string>(flavorSync.WinClipRecord!),
                     RowNextReplay = new Queue<string>(flavorSync.RowNextRecord!),
                     ClipNextReplay = new Queue<string>(flavorSync.ClipNextRecord!),
+                    PickReplay = new Queue<string>(flavorSync.PickRecord!),
                 };
                 resolvedHtml = await ResolveTokensAsync(PrepareRichHtmlForSend(html), dispatcherQueue, CurrentRunCtx,
                     originalClipboard.Text ?? string.Empty, escapeBracesInSubstitution: true,

@@ -144,11 +144,23 @@ export function ClipboardModifierBody({
           radio-style state, so combinations like UPPERCASE + Sentence case are
           impossible by construction. Trim is orthogonal (whitespace, not case). */}
       <Section label="Transform">
-        <div className="grid grid-flow-col grid-rows-3 gap-x-3">
+        {/* grid-rows-4 since the two text filters joined Trim: they are orthogonal cleanup
+            toggles like Trim, NOT part of the case radio cluster below. */}
+        <div className="grid grid-flow-col grid-rows-4 gap-x-3">
           <CheckRow
             checked={state.trim}
             onChange={() => setState((s) => ({ ...s, trim: !s.trim }))}
             label="Trim"
+          />
+          <CheckRow
+            checked={state.noAccents}
+            onChange={() => setState((s) => ({ ...s, noAccents: !s.noAccents }))}
+            label="Remove accents"
+          />
+          <CheckRow
+            checked={state.digitsOnly}
+            onChange={() => setState((s) => ({ ...s, digitsOnly: !s.digitsOnly }))}
+            label="Digits only"
           />
           <CheckRow
             checked={state.case === 'upper'}
