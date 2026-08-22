@@ -248,6 +248,30 @@ namespace TrueReplayer.Services
             (p => p.Actions.Any(a => string.Equals(a.ActionType, "Return", StringComparison.OrdinalIgnoreCase)),
                 new Version(2, 24, 0), "Return flow line"),
 
+            // The While loop block — an older build has no case for While/EndLoop: both rows
+            // no-op through the silent default, so the BODY RUNS EXACTLY ONCE regardless of
+            // the condition — the If/Else no-op class (2.3.0), on a block whose whole point
+            // is repetition. One row of either type pins the feature.
+            // Introduced after 2.24.0 — bump at release.
+            (p => p.Actions.Any(a => string.Equals(a.ActionType, "While", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(a.ActionType, "EndLoop", StringComparison.OrdinalIgnoreCase)),
+                new Version(2, 24, 0), "While loop"),
+
+            // Break / Next Iteration — an older build no-ops the jump row: a Break-guarded
+            // loop keeps looping, a Next keeps running the rest of the iteration it was
+            // meant to cut short. Shared row (they ship together, same failure class).
+            // Introduced after 2.24.0 — bump at release.
+            (p => p.Actions.Any(a => string.Equals(a.ActionType, "BreakLoop", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(a.ActionType, "ContinueLoop", StringComparison.OrdinalIgnoreCase)),
+                new Version(2, 24, 0), "Loop control (Break/Next)"),
+
+            // For Each Data Row — an older build no-ops opener and closer and runs the body
+            // ONCE in the ambient context: a block written to fan out over N rows silently
+            // degrades to a single pass with whatever {row:col} happens to resolve.
+            // Introduced after 2.24.0 — bump at release.
+            (p => p.Actions.Any(a => string.Equals(a.ActionType, "ForEachRow", StringComparison.OrdinalIgnoreCase)),
+                new Version(2, 24, 0), "For Each Data Row block"),
+
             // Assert quiet-stop (AssertOnFail == "StopReplay") — property-level pin, the
             // SlotMode=='clear' mold. An older build doesn't know the value and falls through
             // to the arms below it: in a plain run that's the LOUD halt (still stops, just

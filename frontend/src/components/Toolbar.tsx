@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect, lazy, Suspense } from 'react';
-import { Trash2, Undo2, Redo2, Type, ScanSearch, Pipette, Keyboard, Globe, Repeat2, Hourglass, X, GitBranch, ScanEye, Braces, AppWindow, Clipboard, ClipboardCopy, ChevronDown, Dice5, Cpu, FileCheck, Clock, Table2, ShieldCheck, CircleStop, CornerDownLeft } from 'lucide-react';
+import { Trash2, Undo2, Redo2, Type, ScanSearch, Pipette, Keyboard, Globe, Repeat2, Hourglass, X, GitBranch, ScanEye, Braces, AppWindow, Clipboard, ClipboardCopy, ChevronDown, Dice5, Cpu, FileCheck, Clock, Table2, ShieldCheck, CircleStop, CornerDownLeft, IterationCw, ArrowRightFromLine, SkipForward } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -14,7 +14,7 @@ import { KeystrokeCaptureDialog } from './KeystrokeCaptureDialog';
 import { PauseDialog } from './PauseDialog';
 import { useFlyoutFlip } from '../hooks/useFlyoutFlip';
 import { useDismissOnOutside } from '../hooks/useDismissOnOutside';
-import { snapIndicesToBlocks } from '../utils/conditionalBlocks';
+import { snapIndicesToBlocks, loopDepthAt } from '../utils/conditionalBlocks';
 
 export interface ColumnVisibility {
   action: boolean;
@@ -106,7 +106,7 @@ function ResponsiveProfileName({ name }: { name: string }) {
 }
 
 export function Toolbar(_props: ToolbarProps) {
-  const { toolbar, buttonStates, actions, activeProfile, settings } = useAppState();
+  const { toolbar, buttonStates, actions, activeProfile, settings, dataTable } = useAppState();
   const { send } = useBridge();
   const tt = useTt();
   const { showToast } = useToast();
@@ -180,6 +180,10 @@ export function Toolbar(_props: ToolbarProps) {
   // climbing) plus the run-ending leaves; the menu is the "things that end the run" family.
   const [showAssertMenu, setShowAssertMenu] = useState(false);
   const assertMenuRef = useRef<HTMLDivElement>(null);
+  // Loop ▾ — the repetition family: While guards, For Each Data Row, and the two
+  // in-loop jumps (Break / Next), which grey out when the insert point is outside a loop.
+  const [showLoopMenu, setShowLoopMenu] = useState(false);
+  const loopMenuRef = useRef<HTMLDivElement>(null);
   const [showNavigateDialog, setShowNavigateDialog] = useState(false);
   const [showRunProfileDialog, setShowRunProfileDialog] = useState(false);
   // Pause modal (Pattern B normalization) — was an insert-then-Sheet flow before;
@@ -199,6 +203,7 @@ export function Toolbar(_props: ToolbarProps) {
   const waitFlyout = useFlyoutFlip(showWaitMenu, 'below');
   const conditionalFlyout = useFlyoutFlip(showConditionalMenu, 'below');
   const assertFlyout = useFlyoutFlip(showAssertMenu, 'below');
+  const loopFlyout = useFlyoutFlip(showLoopMenu, 'below');
   const browserFlyout = useFlyoutFlip(showBrowserMenu, 'below');
   // Clear All confirm popover — the only destructive toolbar action gets a
   // two-step confirm, anchored/dismissed exactly like the sibling flyouts.
@@ -296,7 +301,7 @@ export function Toolbar(_props: ToolbarProps) {
     };
   }, [send, showToast, tt]);
 
-  // Outside-press + Escape dismissal for the four insert dropdowns. One CALL per
+  // Outside-press + Escape dismissal for the five insert dropdowns. One CALL per
   // menu, not one call for all of them: each keeps its own pair of listeners, bound
   // only while that menu is open, which is what makes them close independently
   // (clicking inside Browser doesn't close Conditional, and vice versa). The
@@ -308,6 +313,7 @@ export function Toolbar(_props: ToolbarProps) {
   useDismissOnOutside(showConditionalMenu, conditionalMenuRef, setShowConditionalMenu);
   useDismissOnOutside(showWaitMenu, waitMenuRef, setShowWaitMenu);
   useDismissOnOutside(showAssertMenu, assertMenuRef, setShowAssertMenu);
+  useDismissOnOutside(showLoopMenu, loopMenuRef, setShowLoopMenu);
 
   // Close the Clear-All confirm if a run starts (or the list empties) while it's
   // open — runs are usually started by global hotkeys, which produce no mousedown,
@@ -610,10 +616,10 @@ export function Toolbar(_props: ToolbarProps) {
             <Hourglass size={14} />
           </button>
 
-          {/* Direct inserts | menu-based inserts divider. The four buttons after
-              this line open flyout menus (Wait / Conditional / Assert / Browser) —
-              the chevron each one carries is the "this opens a menu" affordance
-              that separates them from the one-click inserts to the left. */}
+          {/* Direct inserts | menu-based inserts divider. The five buttons after
+              this line open flyout menus (Wait / Conditional / Loop / Assert /
+              Browser) — the chevron each one carries is the "this opens a menu"
+              affordance that separates them from the one-click inserts to the left. */}
           <div className="w-px h-4 bg-border-subtle mx-0.5" />
 
           {/* Wait — sub-picker for the two blocking-probe variants. Replaces the
@@ -807,6 +813,101 @@ export function Toolbar(_props: ToolbarProps) {
 
               </div>
             )}
+          </div>
+
+          {/* Loop ▾ — the repetition family. While reuses the If condition machinery
+              (Image/Pixel route through the SAME capture overlays; state families insert
+              directly and open the Sheet) minus Random: a coin-flip loop guard has no
+              stable ending, and offering it would be an infinite-loop trap. For Each Data
+              Row is the configuration-free block (always enabled — the label carries the
+              live row count as its own hint). Break/Next grey out when the insert point
+              is outside a loop (loopDepthAt) — greyed, never hidden, so the feature stays
+              discoverable. */}
+          <div className="relative" ref={loopMenuRef}>
+            <button
+              tabIndex={-1}
+              onClick={() => setShowLoopMenu(!showLoopMenu)}
+              disabled={insertsDisabled}
+              className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled flex items-center gap-0.5"
+              data-tip={clickerTip('Loop', 'Loop')}
+            >
+              <IterationCw size={14} />
+              <ChevronDown size={9} className="opacity-60" />
+            </button>
+            {showLoopMenu && (() => {
+              // Selection is stable while the menu is open (clicking a row dismisses it),
+              // so the insert point — and the Break/Next gate — is computed once per open.
+              const loopSel = selectionRef.current;
+              const loopInsertAt = loopSel.size > 0 ? Math.min(...loopSel) : actions.length;
+              const loopDepth = loopDepthAt(actions, loopInsertAt);
+              const rowsN = dataTable.rows.length;
+              return (
+              <div ref={loopFlyout.ref} className={`absolute w-60 bg-bg-surface border border-border-default rounded-lg shadow-xl z-50 py-1 ${loopFlyout.flipX ? 'right-0' : 'left-0'} ${loopFlyout.flipY ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
+                <div className="px-3 py-1 label-micro text-text-tertiary">
+                  Insert While — repeats while true
+                </div>
+                {([
+                  { ct: 'ImageFound', Icon: ScanSearch, label: 'Image Found' },
+                  { ct: 'PixelColorMatch', Icon: Pipette, label: 'Pixel Color Match' },
+                  { ct: 'WindowOpen', Icon: AppWindow, label: 'Window Open' },
+                  { ct: 'ClipboardMatch', Icon: Clipboard, label: 'Clipboard' },
+                  { ct: 'BrowserElementState', Icon: Globe, label: 'Browser Element' },
+                  { ct: 'Variable', Icon: Braces, label: 'Variable' },
+                  { ct: 'ProcessRunning', Icon: Cpu, label: 'Process Running' },
+                  { ct: 'FileExists', Icon: FileCheck, label: 'File Exists' },
+                  { ct: 'TimeWindow', Icon: Clock, label: 'Time' },
+                ] as const).map(({ ct, Icon, label }) => (
+                  <button
+                    key={`loop-${ct}`}
+                    className="w-full text-left px-3 py-1.5 text-xs text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors flex items-center gap-2"
+                    onClick={() => {
+                      send({ type: 'actions:insertLoop', payload: { conditionType: ct, insertIndex: loopInsertAt } });
+                      setShowLoopMenu(false);
+                    }}
+                  >
+                    <Icon size={12} style={{ color: 'var(--color-action-loop-fg, var(--color-action-if-fg))' }} />
+                    {label}
+                  </button>
+                ))}
+                <div className="my-1 border-t border-border-subtle" />
+                <button
+                  className="w-full text-left px-3 py-1.5 text-xs text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors flex items-center gap-2"
+                  onClick={() => {
+                    send({ type: 'actions:insertLoop', payload: { kind: 'ForEachRow', insertIndex: loopInsertAt } });
+                    setShowLoopMenu(false);
+                  }}
+                >
+                  <Table2 size={12} style={{ color: 'var(--color-action-loop-fg, var(--color-action-if-fg))' }} />
+                  For Each Data Row
+                  <span className="ml-auto text-[10px] text-text-tertiary">{rowsN} row{rowsN === 1 ? '' : 's'}</span>
+                </button>
+                <div className="my-1 border-t border-border-subtle" />
+                <div className="px-3 py-1 label-micro text-text-tertiary">
+                  Loop control
+                </div>
+                {([
+                  { at: 'BreakLoop', Icon: ArrowRightFromLine, label: 'Break loop' },
+                  { at: 'ContinueLoop', Icon: SkipForward, label: 'Next iteration' },
+                ] as const).map(({ at, Icon, label }) => (
+                  <button
+                    key={`loopctl-${at}`}
+                    disabled={loopDepth === 0}
+                    data-tip={loopDepth === 0
+                      ? tt('Only valid inside a loop — insert a While or For Each Data Row first', 'Só vale dentro de um loop — insira um While ou For Each Data Row antes')
+                      : undefined}
+                    className="w-full text-left px-3 py-1.5 text-xs text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors flex items-center gap-2 disabled:text-text-disabled disabled:hover:bg-transparent"
+                    onClick={() => {
+                      send({ type: 'actions:insertAction', payload: { actionType: at, insertIndex: loopInsertAt } });
+                      setShowLoopMenu(false);
+                    }}
+                  >
+                    <Icon size={12} style={{ color: loopDepth === 0 ? undefined : 'var(--color-action-loop-fg, var(--color-action-if-fg))' }} />
+                    {label}
+                  </button>
+                ))}
+              </div>
+              );
+            })()}
           </div>
 
           {/* Assert ▾ — the "things that end the run" family. The six state asserts moved

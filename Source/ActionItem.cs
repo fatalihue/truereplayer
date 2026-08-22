@@ -138,6 +138,12 @@ namespace TrueReplayer.Models
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
         public int ConditionTimeout { get; set; }
 
+        // While-loop iteration ceiling (ActionType == "While"). 0 = the 1000-iteration
+        // safety default. Reaching the ceiling exits the loop as a NORMAL "ok" exit with a
+        // log line, never an error — the knob is a runaway guard, not an assertion.
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+        public int LoopMaxIterations { get; set; }
+
         // ── If Window (ConditionType == "WindowOpen") probe fields ──
         // A state-based condition: TRUE when a visible top-level window matching
         // ProcessName AND/OR Title exists (or is the foreground window when
@@ -568,7 +574,10 @@ namespace TrueReplayer.Models
             "If", "Else", "EndIf", "Assert",
             // Flow leaves — Stop ends the run, Return ends the current pass. They decide,
             // they never touch the screen. Same third-list warning as above applies.
-            "Stop", "Return"
+            "Stop", "Return",
+            // The loop family (2.24.0+): While borrows the If treatment (probe coordinates
+            // via DisplayX/Y below); the other four are pure structure/jumps.
+            "While", "EndLoop", "BreakLoop", "ContinueLoop", "ForEachRow"
         };
 
         private bool HideCoordinates => NoCoordinateActionTypes.Contains(ActionType ?? "");
@@ -595,12 +604,20 @@ namespace TrueReplayer.Models
         // regular WaitPixelColor row would after the column is enabled. ImageFound
         // conditions still render blank (the IF row doesn't have a single XY — the
         // matched-rect is dynamic per probe).
+        // While rows carry the same probe fields as If (the loop guard IS a condition),
+        // so the pixel-coordinate borrow applies to both. internal: the image-lifecycle
+        // sites (WebViewBridge + ProfileController's cleanup/carry/export/import) key off
+        // THIS predicate — a site asking "If" directly goes blind to While-guarded images.
+        internal bool IsConditionOpener =>
+            string.Equals(ActionType, "If", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(ActionType, "While", StringComparison.OrdinalIgnoreCase);
+
         [System.Text.Json.Serialization.JsonIgnore]
         public string DisplayX
         {
             get
             {
-                if (string.Equals(ActionType, "If", StringComparison.OrdinalIgnoreCase) &&
+                if (IsConditionOpener &&
                     string.Equals(ConditionType, "PixelColorMatch", StringComparison.OrdinalIgnoreCase))
                     return PixelX?.ToString() ?? "";
                 return HideCoordinates ? "" : X.ToString();
@@ -612,7 +629,7 @@ namespace TrueReplayer.Models
         {
             get
             {
-                if (string.Equals(ActionType, "If", StringComparison.OrdinalIgnoreCase) &&
+                if (IsConditionOpener &&
                     string.Equals(ConditionType, "PixelColorMatch", StringComparison.OrdinalIgnoreCase))
                     return PixelY?.ToString() ?? "";
                 return HideCoordinates ? "" : Y.ToString();
@@ -648,7 +665,7 @@ namespace TrueReplayer.Models
                 // the block intent without opening the Sheet. The frontend renders the
                 // NOT badge separately when ConditionNegate is true, so this stays clean
                 // (no "NOT " prefix string concat — keeps presentation in the renderer).
-                if (string.Equals(ActionType, "If", StringComparison.OrdinalIgnoreCase))
+                if (IsConditionOpener)
                 {
                     if (string.Equals(ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase))
                     {
@@ -811,6 +828,7 @@ namespace TrueReplayer.Models
             ConditionNegate = ConditionNegate,
             IfOnProbeError = IfOnProbeError,
             ConditionTimeout = ConditionTimeout,
+            LoopMaxIterations = LoopMaxIterations,
             WindowProcessName = WindowProcessName,
             WindowTitle = WindowTitle,
             WindowTitleMatchMode = WindowTitleMatchMode,

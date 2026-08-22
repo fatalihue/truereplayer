@@ -70,7 +70,7 @@ const familyTypes: Record<ActionFamily, { value: string; label: string }[]> = {
 
 // NOTE this is the SHEET's copy; displayUtils has its own for the grid's Details column. Both
 // must list a coordinate-less action or it grows phantom X/Y fields in one surface only.
-const noCoordTypes = new Set(['Assert', 'KeyDown', 'KeyUp', 'Keystroke', 'HoldKey', 'RunProfile', 'ScrollUp', 'ScrollDown', 'SendText', 'SetVariable', 'CopyToSlot', 'ActivateWindow', 'WaitImage', 'WaitPixelColor', 'BrowserClick', 'BrowserRightClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate', 'BrowserSelectOption', 'BrowserAssert', 'Pause', 'If', 'Else', 'EndIf', 'Stop', 'Return']);
+const noCoordTypes = new Set(['Assert', 'KeyDown', 'KeyUp', 'Keystroke', 'HoldKey', 'RunProfile', 'ScrollUp', 'ScrollDown', 'SendText', 'SetVariable', 'CopyToSlot', 'ActivateWindow', 'WaitImage', 'WaitPixelColor', 'BrowserClick', 'BrowserRightClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate', 'BrowserSelectOption', 'BrowserAssert', 'Pause', 'If', 'Else', 'EndIf', 'Stop', 'Return', 'While', 'EndLoop', 'BreakLoop', 'ContinueLoop', 'ForEachRow']);
 
 // One normalizer for the Assert on-fail persistence pair: the default Halt stays ''
 // (null on disk), Continue/StopReplay persist verbatim — mirrors the bridge's
@@ -128,7 +128,10 @@ function isBrowserSelectorAction(actionType: string, conditionType?: string | nu
   return actionType === 'BrowserClick' || actionType === 'BrowserRightClick'
     || actionType === 'BrowserType' || actionType === 'BrowserWaitElement'
     || actionType === 'BrowserSelectOption' || actionType === 'BrowserAssert'
-    || (actionType === 'If' && conditionType === 'BrowserElementState');
+    // If AND While: the loop guard renders the same selector editor (isIfBrowser), so it
+    // must persist selectorAlternatives / split text-modes the same way — one gate short
+    // and a picked alternatives list silently vanishes on save.
+    || ((actionType === 'If' || actionType === 'While') && conditionType === 'BrowserElementState');
 }
 
 function parseTextSelector(value: string): { mode: TextMode | null; raw: string } {
@@ -322,6 +325,9 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited, se
   // Optional "wait up to N ms for the condition" poll timeout (0 = instant single check). Stored as
   // a string so the input can be cleared; coerced to a non-negative int on persist.
   const [conditionTimeout, setConditionTimeout] = useState('0');
+  // While iteration ceiling — string for clearability, non-negative int on persist.
+  // 0 = the engine's 1000-iteration safety default.
+  const [loopMaxIterations, setLoopMaxIterations] = useState('0');
 
   // Eyedropper / live-test request tracking — mirrors the WaitImage testMatch /
   // mouse:pickPosition pattern. Single in-flight request at a time; the requestId
@@ -719,6 +725,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited, se
       setConditionNegate(action.conditionNegate || false);
       setIfOnProbeError(action.ifOnProbeError === 'Halt' ? 'Halt' : 'TreatAsFalse');
       setConditionTimeout(String(action.conditionTimeout ?? 0));
+      setLoopMaxIterations(String(action.loopMaxIterations ?? 0));
       // If Window / If Clipboard probe seeding — null/undefined collapse to the defaults.
       setWindowProcessName(action.windowProcessName ?? '');
       setWindowTitle(action.windowTitle ?? '');
@@ -805,7 +812,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited, se
     // Desktop Assert stores the SAME condition payload, so every condition field below must
     // persist for it too. Gating these on _isIf alone would render a full Assert editor whose
     // window/clipboard/variable fields silently never save.
-    const _hasCondition = _isIf || actionType === 'Assert';
+    const _hasCondition = _isIf || actionType === 'Assert' || actionType === 'While';
     const _isIfImage = _hasCondition && action.conditionType === 'ImageFound';
     const _isIfPixel = _hasCondition && action.conditionType === 'PixelColorMatch';
 
@@ -988,14 +995,24 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited, se
       if (ctVal !== (action.conditionTimeout ?? 0)) {
         send({ type: 'actions:edit', payload: { index: actionIndex, field: 'conditionTimeout', value: String(ctVal) } });
       }
-      // IF-only: the Assert editor deliberately doesn't render On Probe Error (its "Halt" makes
-      // the probe rethrow, bypassing the assert's own failure policy), so it must not write it
-      // either — otherwise a hand-edited Assert would have the field silently reset on save.
-      if (_isIf) {
+      // If/While-only: the Assert editor deliberately doesn't render On Probe Error (its
+      // "Halt" makes the probe rethrow, bypassing the assert's own failure policy), so it
+      // must not write it either — otherwise a hand-edited Assert would have the field
+      // silently reset on save. The While guard DOES honor the knob (Halt rethrows out of
+      // the loop; TreatAsFalse reads false and exits it), so it persists like the If.
+      if (_isIf || actionType === 'While') {
         const persistedErr = ifOnProbeError === 'Halt' ? 'Halt' : '';
         const currentErr = action.ifOnProbeError === 'Halt' ? 'Halt' : '';
         if (persistedErr !== currentErr) {
           send({ type: 'actions:edit', payload: { index: actionIndex, field: 'ifOnProbeError', value: persistedErr } });
+        }
+      }
+      // While iteration ceiling — the trinca's save leg (state + hydrate live above; the
+      // dirty mirror below must match this diff exactly).
+      if (actionType === 'While') {
+        const lmVal = Math.max(0, parseInt(loopMaxIterations, 10) || 0);
+        if (lmVal !== (action.loopMaxIterations ?? 0)) {
+          send({ type: 'actions:edit', payload: { index: actionIndex, field: 'loopMaxIterations', value: String(lmVal) } });
         }
       }
 
@@ -1285,7 +1302,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited, se
     // from actionType + action.conditionType which are already in the array, so the
     // callback rebinds whenever those change. Listing the derived flags would also
     // be a forward-reference error (they're declared further down the component body).
-  }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, repeatCount, repeatGapMs, jitterOn, jitterPct, posJitterOn, posJitterPx, timeout, confidence, browserText, variableValue, variableMode, slotMode, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, pixelX, pixelY, pixelColor, pixelTolerance, pixelOnTimeout, pixelInvert, pixelClickOnMatch, conditionNegate, ifOnProbeError, conditionTimeout, windowProcessName, windowTitle, windowTitleMatchMode, windowMatchForegroundOnly, clipboardPatternType, clipboardPattern, randomPercent, conditionOperator, conditionOperand, filePath, timeStart, timeEnd, daysOfWeek, launchPath, launchArgs, activateOnTimeout, restorePosition, restoreSize, windowX, windowY, windowWidth, windowHeight, windowVerb, matchIndex, assertOnFail, alternatives, pickedThisSession, send, onClose]);
+  }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, repeatCount, repeatGapMs, jitterOn, jitterPct, posJitterOn, posJitterPx, timeout, confidence, browserText, variableValue, variableMode, slotMode, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, pixelX, pixelY, pixelColor, pixelTolerance, pixelOnTimeout, pixelInvert, pixelClickOnMatch, conditionNegate, ifOnProbeError, conditionTimeout, loopMaxIterations, windowProcessName, windowTitle, windowTitleMatchMode, windowMatchForegroundOnly, clipboardPatternType, clipboardPattern, randomPercent, conditionOperator, conditionOperand, filePath, timeStart, timeEnd, daysOfWeek, launchPath, launchArgs, activateOnTimeout, restorePosition, restoreSize, windowX, windowY, windowWidth, windowHeight, windowVerb, matchIndex, assertOnFail, alternatives, pickedThisSession, send, onClose]);
 
   // Are there edits the Save-Changes button would persist? MIRRORS handleSave's diffs
   // exactly (same guards/normalisation), returning true on the first field that differs —
@@ -1299,7 +1316,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited, se
     // Desktop Assert stores the SAME condition payload, so every condition field below must
     // persist for it too. Gating these on _isIf alone would render a full Assert editor whose
     // window/clipboard/variable fields silently never save.
-    const _hasCondition = _isIf || actionType === 'Assert';
+    const _hasCondition = _isIf || actionType === 'Assert' || actionType === 'While';
     const _isIfImage = _hasCondition && action.conditionType === 'ImageFound';
     const _isIfPixel = _hasCondition && action.conditionType === 'PixelColorMatch';
 
@@ -1390,12 +1407,17 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited, se
       if (!!conditionNegate !== !!(action.conditionNegate)) return true;
       const ctVal = Math.max(0, parseInt(conditionTimeout, 10) || 0);
       if (ctVal !== (action.conditionTimeout ?? 0)) return true;
-      // Mirrors the IF-only gate in handleSave — an Assert never writes ifOnProbeError, so it
-      // must not report a difference in it as unsaved work either.
-      if (_isIf) {
+      // Mirrors the If/While gate in handleSave — an Assert never writes ifOnProbeError, so
+      // it must not report a difference in it as unsaved work either.
+      if (_isIf || actionType === 'While') {
         const persistedErr = ifOnProbeError === 'Halt' ? 'Halt' : '';
         const currentErr = action.ifOnProbeError === 'Halt' ? 'Halt' : '';
         if (persistedErr !== currentErr) return true;
+      }
+      // While ceiling — the trinca's dirty leg, mirroring handleSave's diff exactly.
+      if (actionType === 'While') {
+        const lmVal = Math.max(0, parseInt(loopMaxIterations, 10) || 0);
+        if (lmVal !== (action.loopMaxIterations ?? 0)) return true;
       }
       if (action.conditionType === 'WindowOpen') {
         if (windowProcessName !== (action.windowProcessName ?? '')) return true;
@@ -1535,7 +1557,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited, se
     }
 
     return false;
-  }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, repeatCount, repeatGapMs, jitterOn, jitterPct, posJitterOn, posJitterPx, timeout, confidence, browserText, variableValue, variableMode, slotMode, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, pixelX, pixelY, pixelColor, pixelTolerance, pixelOnTimeout, pixelInvert, pixelClickOnMatch, conditionNegate, ifOnProbeError, conditionTimeout, windowProcessName, windowTitle, windowTitleMatchMode, windowMatchForegroundOnly, clipboardPatternType, clipboardPattern, randomPercent, conditionOperator, conditionOperand, filePath, timeStart, timeEnd, daysOfWeek, launchPath, launchArgs, activateOnTimeout, restorePosition, restoreSize, windowX, windowY, windowWidth, windowHeight, windowVerb, matchIndex, assertOnFail, alternatives, pickedThisSession]);
+  }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, repeatCount, repeatGapMs, jitterOn, jitterPct, posJitterOn, posJitterPx, timeout, confidence, browserText, variableValue, variableMode, slotMode, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, pixelX, pixelY, pixelColor, pixelTolerance, pixelOnTimeout, pixelInvert, pixelClickOnMatch, conditionNegate, ifOnProbeError, conditionTimeout, loopMaxIterations, windowProcessName, windowTitle, windowTitleMatchMode, windowMatchForegroundOnly, clipboardPatternType, clipboardPattern, randomPercent, conditionOperator, conditionOperand, filePath, timeStart, timeEnd, daysOfWeek, launchPath, launchArgs, activateOnTimeout, restorePosition, restoreSize, windowX, windowY, windowWidth, windowHeight, windowVerb, matchIndex, assertOnFail, alternatives, pickedThisSession]);
 
   // Key capture handler — focusing the field switches it to capture mode (empty + "New
   // key..." + pulse), the next non-modifier key is stored, and the input auto-blurs so
@@ -2056,12 +2078,17 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited, se
   // condition", not off If specifically; only the surrounding chrome differs (Assert adds an
   // on-failure policy and hides On Probe Error — see the editor block).
   const isAssert = actionType === 'Assert';
-  const hasCondition = isIf || isAssert;
+  // The While guard is the third condition-bearing row — the whole If editor (probe
+  // families, Negate, Wait-for-condition, Test buttons) comes along for free via this
+  // one flag. LOCKSTEP RULE: this line and the two _hasCondition twins in the save /
+  // dirty-mirror callbacks must always name the same three types.
+  const isWhile = actionType === 'While';
+  const hasCondition = isIf || isAssert || isWhile;
   const isIfImage = hasCondition && action?.conditionType === 'ImageFound';
   const isIfPixel = hasCondition && action?.conditionType === 'PixelColorMatch';
   const isIfWindow = hasCondition && action?.conditionType === 'WindowOpen';
   const isIfClipboard = hasCondition && action?.conditionType === 'ClipboardMatch';
-  const isIfBrowser = isIf && action?.conditionType === 'BrowserElementState';
+  const isIfBrowser = (isIf || isWhile) && action?.conditionType === 'BrowserElementState';
   const isIfRandom = hasCondition && action?.conditionType === 'Random';
   const isIfVariable = hasCondition && action?.conditionType === 'Variable';
   const isIfProcess = hasCondition && action?.conditionType === 'ProcessRunning';
@@ -2114,7 +2141,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited, se
   // for tooltips). Replaces the inline 17-branch ternary that used to live in the header.
   // "If" vs "Assert" for the condition-family headings below — the flags they key off are
   // shared by both row types now.
-  const condPrefix = isAssert ? 'Assert' : 'If';
+  const condPrefix = isAssert ? 'Assert' : isWhile ? 'While' : 'If';
   const actionLabel = isWaitImage ? 'Wait Image'
     : isSetVariable ? 'Set Variable'
     : isCopyToSlot ? 'Copy to Slot'
@@ -2127,7 +2154,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited, se
     : isIfPixel ? `${condPrefix} Pixel Color Match`
     : isIfWindow ? `${condPrefix} Window Open`
     : isIfClipboard ? `${condPrefix} Clipboard`
-    : isIfBrowser ? 'If Browser Element'
+    : isIfBrowser ? `${condPrefix} Browser Element`
     : isIfRandom ? `${condPrefix} Random`
     : isIfVariable ? `${condPrefix} Variable`
     : isIfProcess ? `${condPrefix} Process Running`
@@ -2135,6 +2162,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited, se
     : isIfTime ? `${condPrefix} Time`
     : isAssert ? 'Assert'
     : isIf ? 'If'
+    : isWhile ? 'While'
     : isElse ? 'Else'
     : isEndIf ? 'End If'
     : actionType === 'BrowserClick' ? 'Click Element'
@@ -2152,6 +2180,10 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited, se
     : actionType === 'Keystroke' ? 'Keystroke'
     : actionType === 'Stop' ? 'Stop'
     : actionType === 'Return' ? 'Return'
+    : actionType === 'EndLoop' ? 'End Loop'
+    : actionType === 'BreakLoop' ? 'Break Loop'
+    : actionType === 'ContinueLoop' ? 'Next Iteration'
+    : actionType === 'ForEachRow' ? 'For Each Data Row'
     : isClickHalf ? `${(clickHalfBase ?? '').replace('Click', '')} Click`
     : actionType;
 
@@ -2164,6 +2196,9 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited, se
     : (actionType === 'Keystroke' || actionType === 'KeyDown' || actionType === 'KeyUp' || actionType === 'HoldKey') ? 'var(--color-action-key-fg)'
     : (isIf || isElse || isEndIf) ? 'var(--color-action-if-fg)'
     : (actionType === 'Stop' || actionType === 'Return') ? 'var(--color-action-flow-fg, var(--color-action-pause-fg))'
+    : (isWhile || actionType === 'EndLoop' || actionType === 'BreakLoop'
+        || actionType === 'ContinueLoop' || actionType === 'ForEachRow')
+      ? 'var(--color-action-loop-fg, var(--color-action-if-fg))'
     : undefined;
 
   return createPortal(
@@ -2347,11 +2382,35 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited, se
             </Field>
             )}
 
-            {/* On Probe Error is an IF-only knob and must stay that way. Its "Halt" setting makes
+            {/* While only — the runaway guard. Sits right under Wait-for-condition so the
+                loop's two "how long can this go on" knobs read as one pair. */}
+            {isWhile && (
+            <Field
+              label="Max iterations"
+              hint={tt('Safety ceiling: the loop exits normally after this many passes even if the condition is still true. 0 = the 1000-iteration default.',
+                      'Teto de segurança: o loop sai normalmente depois deste número de passagens mesmo com a condição ainda verdadeira. 0 = o padrão de 1000 iterações.')}
+            >
+              <NumberInput
+                value={parseInt(loopMaxIterations, 10) || 0}
+                onChange={(n) => setLoopMaxIterations(String(n))}
+                min={0}
+                step={1}
+                thousands
+                suffix="×" suffixInside
+                inputWidth="w-[124px]"
+                inputHeight="h-8"
+                ariaLabel="Maximum loop iterations"
+              />
+            </Field>
+            )}
+
+            {/* On Probe Error is an If/While knob — never Assert's. Its "Halt" setting makes
                 the probe RETHROW, which on an Assert would skip HandleAssertFailure entirely —
                 no "Assert failed" framing, and On failure below silently ignored. The engine
-                instead routes a broken probe through the same failure path as a false one. */}
-            {isIf && (
+                instead routes a broken probe through the same failure path as a false one.
+                On a While, TreatAsFalse reads false and EXITS the loop (fail-safe), Halt
+                stops the run — both honored, so the knob renders. */}
+            {(isIf || isWhile) && (
             <Field
               label="On Probe Error"
               hint={tt('What to do if the check itself errors.', 'O que fazer se a própria checagem der erro.')}
@@ -2795,6 +2854,31 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited, se
             </div>
           )}
 
+          {/* Loop markers — the Else/EndIf stub mold in the loop tint (If fallback). Pure
+              jumps: no delay (the validator zeroes it), nothing to configure here. */}
+          {(actionType === 'EndLoop' || actionType === 'BreakLoop'
+            || actionType === 'ContinueLoop' || actionType === 'ForEachRow') && (
+            <div
+              className="border-l-2 rounded px-2.5 py-2 text-[11px] leading-relaxed text-text-secondary"
+              style={{
+                borderColor: 'var(--color-action-loop-fg, var(--color-action-if-fg))',
+                backgroundColor: 'color-mix(in srgb, var(--color-action-loop-fg, var(--color-action-if-fg)) 8%, transparent)',
+              }}
+            >
+              {actionType === 'EndLoop'
+                ? tt('End Loop closes the loop block and jumps back to its opening row. Configure the loop on the opening While / For Each Data Row — nothing to set here.',
+                     'End Loop fecha o bloco de loop e volta para a linha de abertura. Configure o loop na linha While / For Each Data Row de abertura — nada a definir aqui.')
+                : actionType === 'BreakLoop'
+                ? tt('Break Loop exits the innermost loop immediately — the run continues after its End Loop.',
+                     'Break Loop sai do loop mais interno imediatamente — a execução continua depois do End Loop dele.')
+                : actionType === 'ContinueLoop'
+                ? tt('Next Iteration jumps back to the innermost loop’s opening row: a While re-checks its condition, a For Each Data Row moves to the next row.',
+                     'Next Iteration volta para a abertura do loop mais interno: um While volta a checar a condição, um For Each Data Row passa para a próxima linha.')
+                : tt('For Each Data Row runs its block once per row of the ACTIVE data table — {row:column} resolves from the current row inside. Empty table = the block is skipped.',
+                     'For Each Data Row roda o bloco uma vez por linha da tabela de dados ATIVA — {row:coluna} resolve da linha atual lá dentro. Tabela vazia = o bloco é pulado.')}
+            </div>
+          )}
+
           {/* Stop / Return — flow leaves in the Else/EndIf stub mold, tinted with the flow
               family (pause fallback) instead of the If teal. Delay + Notes still apply. */}
           {(actionType === 'Stop' || actionType === 'Return') && (
@@ -2957,7 +3041,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited, se
 
             {/* WAIT UNTIL — WaitImage only. IF rows route "wait for absence" via the
                 CONDITION section's Found / NOT Found toggle. */}
-            {!isIf && (
+            {!isIf && !isWhile && (
             <Field label="Wait Until">
               <SegmentedControl<'appears' | 'disappears'>
                 ariaLabel="Wait until"
@@ -2976,7 +3060,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited, se
                 shape to the Pixel editor's matching block. Edited in milliseconds
                 (min 1000 — the backend clamps non-Pause timeouts to ≥1s anyway), step
                 1000 so the +/- spinner moves a second at a time. */}
-            {!isIf && (
+            {!isIf && !isWhile && (
             <div className="flex gap-2.5">
               <Field label="Timeout" className="w-[124px] shrink-0">
                 <NumberInput
@@ -3011,7 +3095,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited, se
                 meaning). Suppressed on IF rows (the user routes click via a regular
                 LeftClick in the TRUE branch) and when waiting for disappearance (no
                 found-location to click on). */}
-            {!isIf && !waitImageInvert && (
+            {!isIf && !isWhile && !waitImageInvert && (
               <Checkbox
                 checked={waitImageClickOnMatch}
                 onChange={setWaitImageClickOnMatch}
@@ -3151,7 +3235,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited, se
             {/* WAIT UNTIL — WaitPixelColor only. Same shape (own row, dropdown) and
                 same label as the WaitImage editor above. IF rows express the same
                 concept via the CONDITION section's Found / NOT Found toggle. */}
-            {!isIf && (
+            {!isIf && !isWhile && (
             <Field label="Wait Until">
               <SegmentedControl<'matches' | 'stopsMatching'>
                 ariaLabel="Wait until"
@@ -3169,7 +3253,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited, se
             {/* TIMEOUT + ON TIMEOUT — WaitPixelColor only. Side-by-side row identical
                 in shape to the WaitImage editor above. Edited in milliseconds (min 1000,
                 step 1000) — same unit as every other action duration. */}
-            {!isIf && (
+            {!isIf && !isWhile && (
             <div className="flex gap-2.5">
               <Field label="Timeout" className="w-[124px] shrink-0">
                 <NumberInput
@@ -3202,7 +3286,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited, se
 
             {/* After Match — bare Checkbox (no Field wrapper). IF rows route click via
                 a regular LeftClick in the TRUE branch. */}
-            {!isIf && !pixelInvert && (
+            {!isIf && !isWhile && !pixelInvert && (
               <Checkbox
                 checked={pixelClickOnMatch}
                 onChange={setPixelClickOnMatch}
@@ -4428,7 +4512,13 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited, se
               users to set a value that gets silently ignored. Also suppressed for browser
               actions — they render their own Delay inside the Test/Timeout/Delay cluster
               (bound to the same delay state), so this would be a duplicate. */}
-          {!isConditional && !isBrowser && (
+          {/* Loop markers are pure jumps: the engine never pays their delay and the
+              load-time validator zeroes it — an editable field here would persist a
+              value that silently reverts on the next load. While is NOT a marker
+              (its delay is the per-iteration settle knob) and keeps the field. */}
+          {!isConditional && !isBrowser
+            && actionType !== 'EndLoop' && actionType !== 'BreakLoop'
+            && actionType !== 'ContinueLoop' && actionType !== 'ForEachRow' && (
           <Field label="Delay" className="w-[124px]">
             <NumberInput
               value={parseInt(delay, 10) || 0}

@@ -17,7 +17,7 @@ const DISPLAY_KEY_MAP: Record<string, string> = {
   'Next': 'Page Down', 'Prior': 'Page Up',
 };
 
-const NO_COORD_TYPES = new Set(['Assert', 'KeyDown', 'KeyUp', 'Keystroke', 'HoldKey', 'ScrollUp', 'ScrollDown', 'SendText', 'SetVariable', 'CopyToSlot', 'ActivateWindow', 'WaitImage', 'WaitPixelColor', 'BrowserClick', 'BrowserRightClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate', 'BrowserSelectOption', 'BrowserAssert', 'RunProfile', 'Pause', 'If', 'Else', 'EndIf', 'Stop', 'Return']);
+const NO_COORD_TYPES = new Set(['Assert', 'KeyDown', 'KeyUp', 'Keystroke', 'HoldKey', 'ScrollUp', 'ScrollDown', 'SendText', 'SetVariable', 'CopyToSlot', 'ActivateWindow', 'WaitImage', 'WaitPixelColor', 'BrowserClick', 'BrowserRightClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate', 'BrowserSelectOption', 'BrowserAssert', 'RunProfile', 'Pause', 'If', 'Else', 'EndIf', 'Stop', 'Return', 'While', 'EndLoop', 'BreakLoop', 'ContinueLoop', 'ForEachRow']);
 
 export function getDisplayKey(key: string): string {
   if (!key) return '';
@@ -59,7 +59,7 @@ export function formatMs(ms: number, language: 'en' | 'pt-BR'): string {
 // in pixelX/pixelY and show it in the Details column.
 function showsPixelCoords(item: ActionItem): boolean {
   return item.actionType === 'WaitPixelColor'
-    || (item.actionType === 'If' && item.conditionType === 'PixelColorMatch');
+    || ((item.actionType === 'If' || item.actionType === 'While') && item.conditionType === 'PixelColorMatch');
 }
 
 export function getDisplayX(item: ActionItem): string {
@@ -94,6 +94,15 @@ function computeActionTypeColors(actionType: string): { bg: string; fg: string }
   // marker (If / Else / EndIf) so the whole block reads as one cohesive surface.
   if (actionType === 'If' || actionType === 'Else' || actionType === 'EndIf')
     return { bg: 'var(--color-action-if-bg)', fg: 'var(--color-action-if-fg)' };
+  // Loop family: dedicated tokens with the If fallback — zero work across the 37 themes
+  // now, and any theme can opt into a distinct loop tint later (the ActivateWindow mold).
+  // The family shares the If hue deliberately: a While IS a condition row.
+  if (actionType === 'While' || actionType === 'EndLoop'
+      || actionType === 'BreakLoop' || actionType === 'ContinueLoop' || actionType === 'ForEachRow')
+    return {
+      bg: 'var(--color-action-loop-bg, var(--color-action-if-bg))',
+      fg: 'var(--color-action-loop-fg, var(--color-action-if-fg))',
+    };
   // Desktop Assert shares the If hue: it runs the SAME condition probes, so the grid reads the
   // two as one family. A dedicated token would have to be added to all 48 theme presets for a
   // single action — the same trade-off the CopyToSlot and ActivateWindow entries below record.

@@ -381,10 +381,11 @@ namespace TrueReplayer.Controllers
             {
                 var action = profile.Actions[i];
                 if (string.IsNullOrEmpty(action.ImagePath)) continue;
-                // Same predicate as the paste / duplicate / import sites: an IF row with
-                // ConditionType "ImageFound" shares WaitImage's per-profile PNG storage.
+                // Same predicate as the paste / duplicate / import sites: a condition OPENER
+                // (If or While) with ConditionType "ImageFound" shares WaitImage's per-profile
+                // PNG storage — ActionItem.IsConditionOpener is the one source of that rule.
                 bool refsImage = action.ActionType == "WaitImage"
-                    || (action.ActionType == "If" && string.Equals(action.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase));
+                    || (action.IsConditionOpener && string.Equals(action.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase));
                 if (!refsImage) continue;
 
                 if (!TryCarryOneImage(srcKey, dstKey, action.ImagePath!, out string? carriedName))
@@ -564,8 +565,10 @@ namespace TrueReplayer.Controllers
         private static string FormatBlockFixupToast(string profileName, ConditionalBlockValidator.BlockValidationResult fix)
         {
             var parts = new List<string>(2);
+            // "closing marker", not "EndIf": since the loop blocks joined, the synthetic
+            // closer may be an EndLoop — the counter is family-blind by design.
             if (fix.EndIfsAppended > 0)
-                parts.Add($"appended {fix.EndIfsAppended} EndIf{(fix.EndIfsAppended == 1 ? "" : "s")}");
+                parts.Add($"appended {fix.EndIfsAppended} closing marker{(fix.EndIfsAppended == 1 ? "" : "s")}");
             if (fix.OrphansRemoved > 0)
                 parts.Add($"removed {fix.OrphansRemoved} orphan{(fix.OrphansRemoved == 1 ? "" : "s")}");
             return $"Auto-repaired conditional blocks in '{profileName}': {string.Join(", ", parts)}";
@@ -890,7 +893,7 @@ namespace TrueReplayer.Controllers
                 {
                     if (string.IsNullOrEmpty(a.ImagePath)) continue;
                     if (a.ActionType == "WaitImage"
-                        || (a.ActionType == "If" && string.Equals(a.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase)))
+                        || (a.IsConditionOpener && string.Equals(a.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase)))
                     {
                         refs.Add(a.ImagePath);
                     }
@@ -1678,7 +1681,7 @@ namespace TrueReplayer.Controllers
                 {
                     if (string.IsNullOrEmpty(action.ImagePath)) continue;
                     bool refsImage = action.ActionType == "WaitImage"
-                        || (action.ActionType == "If" && string.Equals(action.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase));
+                        || (action.IsConditionOpener && string.Equals(action.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase));
                     if (refsImage)
                     {
                         var base64 = ImageStorageService.ReadAsBase64(name, action.ImagePath);
@@ -2185,7 +2188,7 @@ namespace TrueReplayer.Controllers
                 {
                     if (string.IsNullOrEmpty(imgAction.ImagePath)) continue;
                     bool refsImage = imgAction.ActionType == "WaitImage"
-                        || (imgAction.ActionType == "If" && string.Equals(imgAction.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase));
+                        || (imgAction.IsConditionOpener && string.Equals(imgAction.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase));
                     // Count only genuinely-absent PNGs: not restored from this envelope AND not
                     // already present on disk (an Overwrite re-import may legitimately omit images
                     // the receiver already has — those rows still resolve at replay).

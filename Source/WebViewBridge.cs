@@ -285,9 +285,20 @@ namespace TrueReplayer
                 // Flow leaves (2.24.0+): Stop ends the run as success, Return ends the current
                 // pass. Cases in ActionExecution's switch — the mirror rule above applies.
                 "Stop", "Return",
+                // Loop family (2.24.0+): While/ForEachRow open, EndLoop closes both,
+                // BreakLoop/ContinueLoop jump within the innermost loop.
+                "While", "EndLoop", "BreakLoop", "ContinueLoop", "ForEachRow",
                 "BrowserClick", "BrowserRightClick", "BrowserType",
                 "BrowserWaitElement", "BrowserNavigate", "BrowserSelectOption", "BrowserAssert",
             };
+
+        // A row whose CONDITION owns image/pixel probe data — If since 2.3.0, While since the
+        // loop family shipped. Every image-lifecycle site (thumbnail, paste, recapture, crop,
+        // duplicate, profile-copy, coordinate conversion) must ask THIS, never "If" — or a
+        // While-guarded image silently loses its lifecycle.
+        private static bool IsConditionOpenerRow(ActionItem a) =>
+            string.Equals(a.ActionType, "If", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(a.ActionType, "While", StringComparison.OrdinalIgnoreCase);
 
         private void EndSelectInteraction()
         {
@@ -754,6 +765,8 @@ namespace TrueReplayer
                     case "actions:insertAction": HandleInsertAction(payload); break;
                     case "actions:addElseBranch": HandleActionsAddElseBranch(payload); break;
                     case "actions:insertConditional": HandleActionsInsertConditional(payload); break;
+                    case "actions:insertLoop": HandleActionsInsertLoop(payload); break;
+                    case "actions:deleteLoop": HandleActionsDeleteLoop(payload); break;
                     case "actions:insertAssert": HandleActionsInsertAssert(payload); break;
                     case "actions:deleteConditional": HandleActionsDeleteConditional(payload); break;
                     case "actions:insertKeystroke": HandleInsertKeystroke(payload); break;
@@ -1012,7 +1025,7 @@ namespace TrueReplayer
                 // "empty" right after a capture even though the row's ImagePath is set.
                 imageBase64 = !string.IsNullOrEmpty(a.ImagePath) && (
                         a.ActionType == "WaitImage"
-                        || (a.ActionType == "If" && string.Equals(a.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase)))
+                        || (IsConditionOpenerRow(a) && string.Equals(a.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase)))
                     ? GetImageBase64Cached(profileName, a.ImagePath)
                     : "",
                 // WaitImage extras (forwarded so the editor restores their state)
@@ -1042,6 +1055,7 @@ namespace TrueReplayer
                 // nulls in anonymous-type round-trip), so the cost on non-conditional rows
                 // is just three JSON-property checks per push.
                 conditionType = a.ConditionType,
+                loopMaxIterations = a.LoopMaxIterations,
                 conditionNegate = a.ConditionNegate,
                 ifOnProbeError = a.IfOnProbeError,
                 conditionTimeout = a.ConditionTimeout,
@@ -3269,7 +3283,7 @@ namespace TrueReplayer
                     // profile so deleting the source doesn't break the paste.
                     bool refsImage = !string.IsNullOrEmpty(clone.ImagePath) && (
                                         clone.ActionType == "WaitImage"
-                                        || (clone.ActionType == "If" && string.Equals(clone.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase)));
+                                        || (IsConditionOpenerRow(clone) && string.Equals(clone.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase)));
                     if (refsImage)
                     {
                         var newPath = ImageStorageService.CloneReferenceImage(srcProfile, clone.ImagePath!, dstProfile);
@@ -3494,6 +3508,10 @@ namespace TrueReplayer
                     break;
                 case "conditionTimeout":
                     if (int.TryParse(value, out int condTimeout)) action.ConditionTimeout = Math.Max(0, condTimeout);
+                    break;
+                case "loopMaxIterations":
+                    // While ceiling: 0 = the 1000-iteration safety default; floor junk at 0.
+                    if (int.TryParse(value, out int loopMax)) action.LoopMaxIterations = Math.Max(0, loopMax);
                     break;
                 case "ifOnProbeError":
                     // Same convention as waitImageOnTimeout / pixelOnTimeout — only the
@@ -3732,12 +3750,17 @@ namespace TrueReplayer
             foreach (var idx in indices)
             {
                 if (idx < 0 || idx >= actions.Count) continue;
-                // ELSE/ENDIF are pure jump markers with no replay delay — never bulk-set theirs. The
-                // opening IF DOES carry a delay (a pre-probe "wait for the condition to settle" knob),
-                // so it's bulk-set like any normal action.
+                // Pure jump markers carry no replay delay — never bulk-set theirs. The opening
+                // IF and WHILE DO carry one (the pre-probe "settle" knob; per iteration on a
+                // While), so they're bulk-set like any normal action. ForEachRow joins the
+                // marker set: it has no probe, and the validator zeroes it at load anyway.
                 var t = actions[idx].ActionType;
                 if (string.Equals(t, "Else", StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(t, "EndIf", StringComparison.OrdinalIgnoreCase))
+                    || string.Equals(t, "EndIf", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(t, "EndLoop", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(t, "BreakLoop", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(t, "ContinueLoop", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(t, "ForEachRow", StringComparison.OrdinalIgnoreCase))
                     continue;
                 actions[idx].Delay = delay;
             }
@@ -4244,6 +4267,20 @@ namespace TrueReplayer
                 return;
             }
 
+            // BreakLoop / ContinueLoop: the Loop ▾ "Loop control" rows — pure jump markers,
+            // inserted with Delay = 0 (the engine never pays their delay and the load-time
+            // validator zeroes it; seeding a CustomDelay here would just be erased later).
+            if (actionType == "BreakLoop" || actionType == "ContinueLoop")
+            {
+                actions.Insert(insertIndex, new ActionItem { ActionType = actionType, Delay = 0, Comment = "" });
+                for (int i = 0; i < actions.Count; i++)
+                    actions[i].RowNumber = i + 1;
+                HasUnsavedChanges = true;
+                PushActionsUpdate();
+                mainController.UpdateButtonStates();
+                return;
+            }
+
             // WaitImage: capture screen region
             if (actionType == "WaitImage")
             {
@@ -4582,24 +4619,32 @@ namespace TrueReplayer
         }
 
         private void InsertConditionalDirect(int insertIndex, string conditionType)
+            => InsertBlockDirect(insertIndex, "If", conditionType);
+
+        // ONE opener+closer inserter for all three block families. If → EndIf; While and
+        // ForEachRow → EndLoop (the shared loop closer). conditionType null = ForEachRow,
+        // which has nothing to configure — no Sheet auto-open, no probe seed.
+        private void InsertBlockDirect(int insertIndex, string openerType, string? conditionType)
         {
             PushUndoState();
             actions.Insert(insertIndex, new ActionItem
             {
-                ActionType = "If",
-                ConditionType = conditionType,
+                ActionType = openerType,
+                ConditionType = conditionType ?? "",
                 Delay = 0,
                 Key = "",
                 Comment = "",
-                // If Random seeds at a 50% coin-flip so a freshly inserted row is
+                // If/While Random seeds at a 50% coin-flip so a freshly inserted row is
                 // immediately functional; 0% would be "never true" — a silently dead
                 // condition. Only the Random family carries this default (others reuse
-                // string/null fields that seed sensibly empty).
+                // string/null fields that seed sensibly empty). The Loop ▾ menu doesn't
+                // offer Random for While (a coin-flip loop guard has no stable ending),
+                // but the seed stays here so a hand-fed payload still lands functional.
                 RandomPercent = string.Equals(conditionType, "Random", StringComparison.OrdinalIgnoreCase) ? 50 : 0,
             });
             actions.Insert(insertIndex + 1, new ActionItem
             {
-                ActionType = "EndIf",
+                ActionType = string.Equals(openerType, "If", StringComparison.OrdinalIgnoreCase) ? "EndIf" : "EndLoop",
                 Delay = 0,
                 Key = "",
                 Comment = "",
@@ -4609,7 +4654,94 @@ namespace TrueReplayer
             HasUnsavedChanges = true;
             PushActionsUpdate();
             mainController.UpdateButtonStates();
-            SendMessage("sheet:openIndex", new { index = insertIndex });
+            if (conditionType != null)
+                SendMessage("sheet:openIndex", new { index = insertIndex });
+        }
+
+        // ── Loop blocks: Insert While / For Each Data Row ─────────────────────
+        // While mirrors the If insert flow exactly (capture-first for Image/Pixel, direct +
+        // Sheet for the state families); ForEachRow is the one configuration-free block.
+        private void HandleActionsInsertLoop(JsonElement payload)
+        {
+            int insertIndex = payload.TryGetProperty("insertIndex", out var iEl) && iEl.ValueKind == JsonValueKind.Number
+                ? iEl.GetInt32()
+                : actions.Count;
+            if (insertIndex < 0 || insertIndex > actions.Count) insertIndex = actions.Count;
+
+            string kind = payload.TryGetProperty("kind", out var kEl) && kEl.ValueKind == JsonValueKind.String
+                ? kEl.GetString() ?? "While"
+                : "While";
+            if (string.Equals(kind, "ForEachRow", StringComparison.OrdinalIgnoreCase))
+            {
+                InsertBlockDirect(insertIndex, "ForEachRow", conditionType: null);
+                return;
+            }
+
+            string conditionType = payload.TryGetProperty("conditionType", out var ct) && ct.ValueKind == JsonValueKind.String
+                ? ct.GetString() ?? ""
+                : "";
+            switch (conditionType)
+            {
+                case "ImageFound":
+                    _ = HandleInsertConditionalImageAsync(insertIndex, "While");
+                    break;
+                case "PixelColorMatch":
+                    _ = HandleInsertConditionalPixelAsync(insertIndex, "While");
+                    break;
+                case "WindowOpen":
+                case "ClipboardMatch":
+                case "BrowserElementState":
+                case "Variable":
+                case "ProcessRunning":
+                case "FileExists":
+                case "TimeWindow":
+                    InsertBlockDirect(insertIndex, "While", conditionType);
+                    break;
+                default:
+                    // Unknown family (incl. Random, which the menu deliberately omits for a
+                    // loop guard) — silent no-op, same posture as the If path.
+                    break;
+            }
+        }
+
+        // Delete the entire loop block (opener + body + EndLoop) — the deleteConditional
+        // mirror with a KIND-aware scan: both loop openers deepen the nesting, and only the
+        // shared EndLoop closer pops it. If blocks inside the body are invisible to this
+        // scan on purpose (their EndIf is not our closer).
+        private void HandleActionsDeleteLoop(JsonElement payload)
+        {
+            if (!payload.TryGetProperty("loopRowIndex", out var idxEl) || idxEl.ValueKind != JsonValueKind.Number) return;
+            int loopIdx = idxEl.GetInt32();
+            if (loopIdx < 0 || loopIdx >= actions.Count) return;
+            bool isLoopOpener = string.Equals(actions[loopIdx].ActionType, "While", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(actions[loopIdx].ActionType, "ForEachRow", StringComparison.OrdinalIgnoreCase);
+            if (!isLoopOpener) return;
+
+            int depth = 0;
+            int endIdx = -1;
+            for (int i = loopIdx + 1; i < actions.Count; i++)
+            {
+                var t = actions[i].ActionType;
+                if (string.Equals(t, "While", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(t, "ForEachRow", StringComparison.OrdinalIgnoreCase)) depth++;
+                else if (string.Equals(t, "EndLoop", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (depth == 0) { endIdx = i; break; }
+                    depth--;
+                }
+            }
+            // No matching EndLoop — same graceful fallback as deleteConditional: remove
+            // just the opener so the user gets visible progress on a malformed list.
+            if (endIdx < 0) endIdx = loopIdx;
+
+            PushUndoState();
+            for (int i = endIdx; i >= loopIdx; i--)
+                actions.RemoveAt(i);
+            for (int i = 0; i < actions.Count; i++)
+                actions[i].RowNumber = i + 1;
+            HasUnsavedChanges = true;
+            PushActionsUpdate();
+            mainController.UpdateButtonStates();
         }
 
         /// <summary>
@@ -4635,7 +4767,7 @@ namespace TrueReplayer
             return false;
         }
 
-        private async Task HandleInsertConditionalImageAsync(int insertIndex)
+        private async Task HandleInsertConditionalImageAsync(int insertIndex, string openerType = "If")
         {
             // Captured BEFORE the overlay: it does not block the app, so an automation fire can
             // swap the profile and refill the action list while the user is still dragging.
@@ -4738,7 +4870,9 @@ namespace TrueReplayer
                     PushUndoState();
                     actions.Insert(at, new ActionItem
                     {
-                        ActionType = "If",
+                        // "If" or "While" — the Loop ▾ menu routes its Image guard through
+                        // this same capture flow, only the opener/closer pair differs.
+                        ActionType = openerType,
                         ConditionType = "ImageFound",
                         ImagePath = imagePath,
                         Confidence = 0.8,
@@ -4754,7 +4888,7 @@ namespace TrueReplayer
                     });
                     actions.Insert(at + 1, new ActionItem
                     {
-                        ActionType = "EndIf",
+                        ActionType = string.Equals(openerType, "If", StringComparison.OrdinalIgnoreCase) ? "EndIf" : "EndLoop",
                         Delay = 0,
                         Key = "",
                         Comment = "",
@@ -4775,7 +4909,7 @@ namespace TrueReplayer
             }
         }
 
-        private async Task HandleInsertConditionalPixelAsync(int insertIndex)
+        private async Task HandleInsertConditionalPixelAsync(int insertIndex, string openerType = "If")
         {
             // Mirror of HandleInsertWaitPixelColorAsync — same point-pick overlay, same
             // relative-coord translation. End result: {If(PixelColorMatch + coords + hex),
@@ -4854,7 +4988,8 @@ namespace TrueReplayer
                     PushUndoState();
                     actions.Insert(at, new ActionItem
                     {
-                        ActionType = "If",
+                        // "If" or "While" — the Loop ▾ Pixel guard shares this capture flow.
+                        ActionType = openerType,
                         ConditionType = "PixelColorMatch",
                         PixelX = storedX,
                         PixelY = storedY,
@@ -4867,7 +5002,7 @@ namespace TrueReplayer
                     });
                     actions.Insert(at + 1, new ActionItem
                     {
-                        ActionType = "EndIf",
+                        ActionType = string.Equals(openerType, "If", StringComparison.OrdinalIgnoreCase) ? "EndIf" : "EndLoop",
                         Delay = 0,
                         Key = "",
                         Comment = "",
@@ -5324,7 +5459,7 @@ namespace TrueReplayer
             // either; the older WaitImage-only check silently dropped the IF Image clicks.
             var a = actions[index];
             bool eligible = a.ActionType == "WaitImage"
-                || (a.ActionType == "If" && string.Equals(a.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase));
+                || (IsConditionOpenerRow(a) && string.Equals(a.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase));
             if (!eligible) return;
             // Anchor on the ROW OBJECT, not on its index. The write-back lands after an overlay
             // the user can sit in for a minute, and `index < actions.Count` is a bounds check,
@@ -5553,7 +5688,7 @@ namespace TrueReplayer
             // this, the Sheet thumbnail's crop-on-click silently no-opped for IF Image.
             bool eligible = !string.IsNullOrEmpty(action.ImagePath) && (
                 action.ActionType == "WaitImage"
-                || (action.ActionType == "If" && string.Equals(action.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase)));
+                || (IsConditionOpenerRow(action) && string.Equals(action.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase)));
             if (!eligible) return;
             if (w < 10 || h < 10) return;
 
@@ -6156,7 +6291,7 @@ namespace TrueReplayer
                     // IF Image and later deleting the original would orphan the duplicate.
                     bool refsImage = !string.IsNullOrEmpty(original.ImagePath) && (
                         original.ActionType == "WaitImage"
-                        || (original.ActionType == "If" && string.Equals(original.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase)));
+                        || (IsConditionOpenerRow(original) && string.Equals(original.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase)));
                     if (refsImage)
                     {
                         clone.ImagePath = ImageStorageService.CloneReferenceImage(profileName, original.ImagePath!, profileName)
@@ -6736,7 +6871,7 @@ namespace TrueReplayer
                     {
                         if (string.IsNullOrEmpty(action.ImagePath)) continue;
                         bool refsImage = action.ActionType == "WaitImage"
-                            || (action.ActionType == "If" && string.Equals(action.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase));
+                            || (IsConditionOpenerRow(action) && string.Equals(action.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase));
                         if (!refsImage) continue;
                         action.ImagePath = ImageStorageService.CloneReferenceImage(name, action.ImagePath!, copyName);
                         mutated = true;
@@ -7568,7 +7703,7 @@ namespace TrueReplayer
                 // are set. The X/Y fields are meaningless without W/H — leaving them at 0
                 // lets the action fall back to a full-screen scan (existing behaviour).
                 else if ((action.ActionType == "WaitImage"
-                          || (action.ActionType == "If" && string.Equals(action.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase)))
+                          || (IsConditionOpenerRow(action) && string.Equals(action.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase)))
                     && action.WaitImageSearchW is int w && action.WaitImageSearchH is int h
                     && w > 0 && h > 0)
                 {
@@ -7579,7 +7714,7 @@ namespace TrueReplayer
                 // WaitPixelColor (and IF Pixel): PixelX/Y are nullable but required for the
                 // action to do anything — only convert when both are present.
                 else if ((action.ActionType == "WaitPixelColor"
-                          || (action.ActionType == "If" && string.Equals(action.ConditionType, "PixelColorMatch", StringComparison.OrdinalIgnoreCase)))
+                          || (IsConditionOpenerRow(action) && string.Equals(action.ConditionType, "PixelColorMatch", StringComparison.OrdinalIgnoreCase)))
                     && action.PixelX.HasValue && action.PixelY.HasValue)
                 {
                     action.PixelX = action.PixelX.Value + sign * rect.Left;

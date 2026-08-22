@@ -1634,6 +1634,11 @@ namespace TrueReplayer.Services
         // batch that skip-on-error exists to protect. Replay-thread-only, save/restored by
         // RunSubProfileOverDataAsync.
         private bool _softFaultOverride;
+        // The CONFIGURED batch flag (what SetDataTable last decided). _dataLoopOver is the
+        // LIVE flag, temporarily hoisted by sub-over-data calls and inline ForEachRow blocks;
+        // the fresh-run reset re-stamps live from configured so no block-local hoist can
+        // survive into the next run (layer 3 of the ForEachRow restore).
+        private bool _dataLoopOverConfigured;
         private bool SkipRowOnErrorActive =>
             (_dataLoopOver && string.Equals(_dataTable?.OnRowError, "skip", StringComparison.OrdinalIgnoreCase))
             || _softFaultOverride;
@@ -1933,6 +1938,10 @@ namespace TrueReplayer.Services
             }
             _dataTable = dataTable;
             _dataLoopOver = loopOverData && dataTable != null;
+            // Belt-and-braces (layer 3 of the ForEachRow restore): remember what the
+            // CONFIGURED value is, so the fresh-run reset can re-stamp _dataLoopOver even
+            // if some future exit path leaks a block-local true past the layer-2 net.
+            _dataLoopOverConfigured = _dataLoopOver;
         }
 
         // Builds the column→cell dict for one data row: lowercased header → cell value.
@@ -2134,6 +2143,7 @@ namespace TrueReplayer.Services
                 _rowFaultReason = null;
                 _returnRequested = false;  // defensive: a Return must never leak in from a prior run
                 _authoredStop = false;     // idem for an authored Stop / quiet-stop
+                _dataLoopOver = _dataLoopOverConfigured;   // layer-3: no ForEachRow hoist survives a run boundary
                 _softFaultOverride = false;
                 _relGeometryDriftWarned = false;   // one geometry-drift notice per run
                 ResetRunReport();          // the report describes THIS run only
@@ -2313,34 +2323,92 @@ namespace TrueReplayer.Services
         // Orphan ELSE / ENDIF (no open IF on the stack) are silently ignored at runtime;
         // the load-time validator should have stripped them, but the engine stays
         // graceful if a hand-edited profile slipped through.
-        private static (Dictionary<int, int> elseOf, Dictionary<int, int> endIfOf) BuildBlockMap(List<ActionItem> actions)
+        // The three block-opening kinds. If closes with EndIf (and may own an Else); While
+        // and ForEachRow share the one EndLoop closer.
+        internal enum BlockKind { If, While, ForEachRow }
+
+        // Pre-pass index maps for one action list. TYPED stack underneath: EndIf only ever
+        // closes an If, EndLoop only a loop opener, and Else only pairs with an If sitting on
+        // TOP — the kind checks are what keep an Else inside a While from leaking into the
+        // outer If (a latent bug the untyped int-stack would have had).
+        private sealed class BlockMap
         {
-            var elseOf = new Dictionary<int, int>();
-            var endIfOf = new Dictionary<int, int>();
-            var stack = new Stack<int>();
+            public readonly Dictionary<int, int> ElseOf = new();     // If idx → Else idx
+            public readonly Dictionary<int, int> EndIfOf = new();    // If/Else idx → EndIf idx
+            public readonly Dictionary<int, int> EndLoopOf = new();  // While/ForEachRow idx → EndLoop idx
+            public readonly Dictionary<int, int> LoopStartOf = new();// EndLoop idx → its opener idx
+            // BreakLoop/ContinueLoop idx → innermost enclosing loop (kind + opener idx).
+            // The closer's index is resolved at execution via EndLoopOf — it isn't known
+            // yet when the jump row is scanned.
+            public readonly Dictionary<int, (BlockKind Kind, int OpenIdx)> EnclosingLoopOf = new();
+        }
+
+        private static BlockMap BuildBlockMap(List<ActionItem> actions)
+        {
+            var map = new BlockMap();
+            var stack = new Stack<(BlockKind Kind, int Idx)>();
             for (int i = 0; i < actions.Count; i++)
             {
                 var t = actions[i].ActionType;
                 if (string.Equals(t, "If", StringComparison.OrdinalIgnoreCase))
                 {
-                    stack.Push(i);
+                    stack.Push((BlockKind.If, i));
+                }
+                else if (string.Equals(t, "While", StringComparison.OrdinalIgnoreCase))
+                {
+                    stack.Push((BlockKind.While, i));
+                }
+                else if (string.Equals(t, "ForEachRow", StringComparison.OrdinalIgnoreCase))
+                {
+                    stack.Push((BlockKind.ForEachRow, i));
                 }
                 else if (string.Equals(t, "Else", StringComparison.OrdinalIgnoreCase))
                 {
-                    if (stack.Count > 0) elseOf[stack.Peek()] = i;
+                    // FIRST Else wins — the same first-wins rule the validator's hasElseFor
+                    // applies, so on a hand-fed list with a duplicate Else the two agree on
+                    // WHICH one is the orphan (last-wins here made the engine no-op the
+                    // first Else while the validator would have removed the second).
+                    if (stack.Count > 0 && stack.Peek().Kind == BlockKind.If
+                        && !map.ElseOf.ContainsKey(stack.Peek().Idx))
+                        map.ElseOf[stack.Peek().Idx] = i;
                 }
                 else if (string.Equals(t, "EndIf", StringComparison.OrdinalIgnoreCase))
                 {
-                    if (stack.Count > 0)
+                    if (stack.Count > 0 && stack.Peek().Kind == BlockKind.If)
                     {
-                        int ifIdx = stack.Pop();
-                        endIfOf[ifIdx] = i;
-                        if (elseOf.TryGetValue(ifIdx, out int elseIdx))
-                            endIfOf[elseIdx] = i;
+                        int ifIdx = stack.Pop().Idx;
+                        map.EndIfOf[ifIdx] = i;
+                        if (map.ElseOf.TryGetValue(ifIdx, out int elseIdx))
+                            map.EndIfOf[elseIdx] = i;
+                    }
+                    // else: orphan/crossed EndIf — no entry, the engine no-ops it (the
+                    // load-time validator removes these; this is the belt for hand-fed lists).
+                }
+                else if (string.Equals(t, "EndLoop", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (stack.Count > 0 && stack.Peek().Kind != BlockKind.If)
+                    {
+                        var opener = stack.Pop();
+                        map.EndLoopOf[opener.Idx] = i;
+                        map.LoopStartOf[i] = opener.Idx;
                     }
                 }
+                else if (string.Equals(t, "BreakLoop", StringComparison.OrdinalIgnoreCase)
+                      || string.Equals(t, "ContinueLoop", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Innermost LOOP, scanning top→base — If frames in between don't count.
+                    foreach (var frame in stack)
+                    {
+                        if (frame.Kind != BlockKind.If)
+                        {
+                            map.EnclosingLoopOf[i] = (frame.Kind, frame.Idx);
+                            break;
+                        }
+                    }
+                    // No loop on the stack → no entry → the row is a no-op at execution.
+                }
             }
-            return (elseOf, endIfOf);
+            return map;
         }
 
         // Shared "× N" repeat driver for the inline-repeat actions (Keystroke and the
@@ -2473,11 +2541,133 @@ namespace TrueReplayer.Services
             || (action.ConditionTimeout > 0
                 && string.Equals(action.ActionType, "Assert", StringComparison.OrdinalIgnoreCase));
 
+        // One live For-Each-Data-Row activation: where the cursor is, what data context to
+        // restore on exit, and the skip tally for the end-of-block summary.
+        private sealed class ForEachFrame
+        {
+            public int Cursor;
+            public DataCtxSnapshot Saved;
+            public int Skipped;
+            public string? FirstReason;
+        }
+
+        // The data-loop context as one restorable unit — extracted so the sub-profile
+        // over-data call and the inline ForEachRow block share ONE save/restore instead of
+        // keeping drifting field-by-field copies (the restore path is where a missed field
+        // becomes a cross-run leak: _dataLoopOver=true leaking out of a cancelled block
+        // turns the NEXT run into batch mode).
+        private readonly struct DataCtxSnapshot
+        {
+            public Models.ProfileDataTable? Table { get; init; }
+            public bool LoopOver { get; init; }
+            public IReadOnlyDictionary<string, string>? RowData { get; init; }
+            public Dictionary<string, int>? RowNextCursors { get; init; }   // null = leave untouched
+            public bool SoftOverride { get; init; }
+        }
+
+        private DataCtxSnapshot SaveDataContext(bool swapRowNextCursors) => new()
+        {
+            Table = _dataTable,
+            LoopOver = _dataLoopOver,
+            RowData = _currentRowData,
+            // The sub-call swaps in a fresh {rownext} cursor dict (it walks the SUB's
+            // table); the inline ForEachRow keeps the ambient one (same table, same walk).
+            RowNextCursors = swapRowNextCursors ? _rowNextCursors : null,
+            SoftOverride = _softFaultOverride,
+        };
+
+        private void RestoreDataContext(in DataCtxSnapshot s)
+        {
+            _dataTable = s.Table;
+            _dataLoopOver = s.LoopOver;
+            _currentRowData = s.RowData;
+            if (s.RowNextCursors != null) _rowNextCursors = s.RowNextCursors;
+            _softFaultOverride = s.SoftOverride;
+            PushVariablesSnapshot();   // live pane: back on the caller's row
+        }
+
+        // Layer-2 safety net for ForEachRow: restores the OUTERMOST live frame's snapshot on
+        // EVERY exit of ExecuteActionsAsync (token cancel, Stop, Return, soft unwind, rethrown
+        // exceptions). `using`-based so the 300-line action loop needs no re-indent. Without
+        // it, _dataLoopOver=true would LEAK out of an aborted block — the fresh-run reset
+        // doesn't clear it (only SetDataTable writes it), and a leaked true flips the next
+        // run into batch row-stamping. Inner frames are stamped states of the outer one and
+        // are discarded, not restored.
+        private sealed class ForEachRestoreNet : IDisposable
+        {
+            private readonly ActionReplayer _owner;
+            private readonly Dictionary<int, ForEachFrame> _state;
+            private readonly List<int> _active;
+            private readonly CancellationToken _token;
+            public ForEachRestoreNet(ActionReplayer owner, Dictionary<int, ForEachFrame> state, List<int> active, CancellationToken token)
+            { _owner = owner; _state = state; _active = active; _token = token; }
+            public void Dispose()
+            {
+                if (_active.Count == 0) return;
+                // Surface the skip tally the frames carry BEFORE discarding them — an authored
+                // Stop / Return / thrown-error exit bypasses ExitForEachFrame, and silently
+                // dropping "N rows failed" under a success cue is the exact lie the
+                // _authoredStop gate exists to prevent (same doctrine as the batch summary).
+                int skipped = 0;
+                string? firstReason = null;
+                foreach (var idx in _active)
+                {
+                    var f = _state[idx];
+                    skipped += f.Skipped;
+                    firstReason ??= f.FirstReason;
+                }
+                _owner.RestoreDataContext(_state[_active[0]].Saved);   // [0] = outermost
+                _active.Clear();
+                _state.Clear();
+                if (skipped > 0 && (!_token.IsCancellationRequested || _owner._authoredStop))
+                    _owner.OnReplayError?.Invoke($"For Each Data Row: {skipped} row(s) skipped after errors"
+                        + (firstReason != null ? $" — first: {firstReason}" : ""));
+            }
+        }
+
         private async Task ExecuteActionsAsync(List<ActionItem> actions, CancellationToken token)
         {
             // Pre-pass per call so nested RunProfile invocations each get a fresh map
             // scoped to the sub-profile's action list. Cost is negligible (~32 B / IF row).
-            var (elseOf, endIfOf) = BuildBlockMap(actions);
+            var map = BuildBlockMap(actions);
+            // Loop-family state, all frame-local: While iteration counters (opener idx →
+            // count so far) and the ForEachRow frames + active stack (outermost first).
+            var loopIterations = new Dictionary<int, int>();
+            var feState = new Dictionary<int, ForEachFrame>();
+            var feActive = new List<int>();
+            using var feNet = new ForEachRestoreNet(this, feState, feActive, token);
+
+            // Structured ForEachRow exit — restore the frame's data context, drop it, and
+            // surface the skip tally (same honesty gate as the batch summary: an authored
+            // Stop re-opens it).
+            void ExitForEachFrame(int openerIdx, ForEachFrame fe)
+            {
+                RestoreDataContext(fe.Saved);
+                feState.Remove(openerIdx);
+                feActive.Remove(openerIdx);
+                if (fe.Skipped > 0 && (!token.IsCancellationRequested || _authoredStop))
+                    OnReplayError?.Invoke($"For Each Data Row: {fe.Skipped} row(s) skipped after errors"
+                        + (fe.FirstReason != null ? $" — first: {fe.FirstReason}" : ""));
+            }
+
+            // A skip-absorb reentry jumps from deep inside the block back to the opener,
+            // trampling whatever inner loops were mid-flight — abandon their state or the
+            // NEXT row would inherit a half-run While counter / a stale nested frame.
+            void AbandonInnerLoopState(int outerOpener)
+            {
+                int end = map.EndLoopOf.TryGetValue(outerOpener, out var e) ? e : actions.Count;
+                List<int>? deadWhiles = null;
+                foreach (var k in loopIterations.Keys)
+                    if (k > outerOpener && k < end) (deadWhiles ??= new List<int>()).Add(k);
+                if (deadWhiles != null)
+                    foreach (var k in deadWhiles) loopIterations.Remove(k);
+                for (int k = feActive.Count - 1; k >= 0; k--)
+                    if (feActive[k] > outerOpener && feActive[k] < end)
+                    {
+                        feState.Remove(feActive[k]);
+                        feActive.RemoveAt(k);
+                    }
+            }
 
             // Schedule each action's delay against a monotonic deadline rather than chaining
             // sleeps. Chaining makes the real cadence delay + action cost + syscall cost, so
@@ -2489,6 +2679,33 @@ namespace TrueReplayer.Services
 
             for (int i = 0; i < actions.Count; i++)
             {
+                // ForEachRow skip-absorb — in THIS frame, before the boundary break (the
+                // sub-call absorbs a faulted row outside ExecuteActionsAsync; an inline
+                // block has no outside). Only when the ACTIVE table's policy is skip;
+                // halt-mode faults fall through to the break below (hard cancel, or soft
+                // unwind to a skip-active parent that absorbs the whole block as one row).
+                if (_rowFaulted && feActive.Count > 0
+                    && string.Equals(_dataTable?.OnRowError, "skip", StringComparison.OrdinalIgnoreCase))
+                {
+                    int fej = feActive[^1];
+                    if (feState.TryGetValue(fej, out var faultedFrame))
+                    {
+                        // Same recovery the batch loop does: release anything the faulted
+                        // row left pressed, tally, clear the fault, reenter for the NEXT
+                        // row (the cursor already advanced at stamp time).
+                        ResetMouseState();
+                        ResetKeyState();
+                        faultedFrame.Skipped++;
+                        faultedFrame.FirstReason ??= _rowFaultReason;
+                        Services.DiagnosticLog.Warn($"For Each Data Row: row {faultedFrame.Cursor} skipped — {_rowFaultReason}");
+                        _rowFaulted = false;
+                        _rowFaultReason = null;
+                        AbandonInnerLoopState(fej);
+                        i = fej - 1;   // for's i++ lands on the opener → next row
+                        continue;
+                    }
+                }
+
                 // _rowFaulted: a skip-mode action failure unwinds the rest of the row's
                 // actions (and any RunProfile recursion level) without cancelling the run.
                 // _returnRequested: a Return row ended the current pass — unwind this frame;
@@ -2540,7 +2757,7 @@ namespace TrueReplayer.Services
                         // end-of-list so the body doesn't run unconditionally. Safer than
                         // continuing past the IF, which would execute the body as if no
                         // IF existed and contradict the user's explicit skip.
-                        if (endIfOf.TryGetValue(i, out int endIdx))
+                        if (map.EndIfOf.TryGetValue(i, out int endIdx))
                             i = endIdx;
                         else
                             i = actions.Count;
@@ -2588,11 +2805,20 @@ namespace TrueReplayer.Services
                         // InstantProbeAsync (the TreatAsFalse policy swallows it instead). Without
                         // this the row would stay "running" and read as in-flight when it actually
                         // killed the run — the same lie the in-flight default was fixed to stop
-                        // telling. Rethrown untouched so the halt still halts.
+                        // telling. Rethrown untouched so the halt still halts — EXCEPT inside an
+                        // inline ForEachRow whose table policy is skip: there a thrown error is a
+                        // ROW error (the sub-over-data catch treats it the same), softened to a
+                        // fault so the loop-top absorb reenters on the next data row.
                         ifRec.Status = "failed";
                         ifRec.ErrorMessage = ex.Message;
                         ifWatch.Stop();
                         ifRec.DurationMs = ifWatch.ElapsedMilliseconds;
+                        if (feActive.Count > 0
+                            && string.Equals(_dataTable?.OnRowError, "skip", StringComparison.OrdinalIgnoreCase))
+                        {
+                            FaultRow(ex.Message);
+                            continue;
+                        }
                         throw;
                     }
                     ifWatch.Stop();
@@ -2610,10 +2836,10 @@ namespace TrueReplayer.Services
                         // FALSE — jump to ELSE if one exists, otherwise to ENDIF. The loop's
                         // i++ lands us on the row AFTER the structural marker (start of the
                         // ELSE body, or the row right after the block if there's no ELSE).
-                        if (elseOf.TryGetValue(i, out int elseIdx))
+                        if (map.ElseOf.TryGetValue(i, out int elseIdx))
                             i = elseIdx;
                         else
-                            i = endIfOf.GetValueOrDefault(i, i);
+                            i = map.EndIfOf.GetValueOrDefault(i, i);
                     }
                     // TRUE → fall through; loop advances to i+1 which is the first body row.
                     continue;
@@ -2627,13 +2853,266 @@ namespace TrueReplayer.Services
                     // no-op so the rows after it run with whatever scope they were already
                     // in. Falling through to the FALSE branch instead would execute the
                     // wrong code path, which is worse than ignoring the orphan marker.
-                    if (endIfOf.TryGetValue(i, out int endIdx))
+                    if (map.EndIfOf.TryGetValue(i, out int endIdx))
                         i = endIdx;
                     continue;
                 }
                 if (string.Equals(action.ActionType, "EndIf", StringComparison.OrdinalIgnoreCase))
                 {
                     continue; // structural marker — no work, no delay, no highlight
+                }
+
+                // ── Loop family — same handled-before-the-leaf-gate contract as If/Else/EndIf:
+                // block jumps happen immediately, structural rows never enter the action
+                // switch, and only the two probe-bearing openers (While here, If above) pay
+                // a delay.
+                if (string.Equals(action.ActionType, "While", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (action.IsSkipped)
+                    {
+                        // Same skip-elide contract as the If row: one record stands for the
+                        // whole greyed-out block, and the entire body is jumped.
+                        RecordRunStep(new RunStepRecord
+                        {
+                            Row = i + 1,
+                            Profile = CurrentExecutingProfileName,
+                            ActionType = "While",
+                            Detail = _runStepsFull ? null : DescribeIfDetail(action, null),
+                            Status = "skipped",
+                        });
+                        // Counter reset on EVERY exit incl. this one — IsSkipped is live
+                        // mid-run (shallow snapshot), and a stale count would shortchange
+                        // the ceiling on a later re-activation in this same pass.
+                        loopIterations.Remove(i);
+                        if (map.EndLoopOf.TryGetValue(i, out int skipEnd))
+                            i = skipEnd;
+                        else
+                            i = actions.Count;
+                        continue;
+                    }
+                    // Iteration ceiling BEFORE the delay/probe: a loop that has spent its
+                    // budget must not pay another settle delay or probe just to find out.
+                    // Exiting on the ceiling is a NORMAL "ok" exit with a log line — the
+                    // knob is a runaway guard, not an assertion.
+                    int done = loopIterations.GetValueOrDefault(i);
+                    int ceiling = action.LoopMaxIterations > 0 ? action.LoopMaxIterations : 1000;
+                    if (done >= ceiling)
+                    {
+                        Services.DiagnosticLog.Warn($"While (row {i + 1}): iteration ceiling {ceiling} reached — exiting loop");
+                        loopIterations.Remove(i);   // reset on EVERY exit — under ForEachRow the same While reenters per row
+                        if (map.EndLoopOf.TryGetValue(i, out int capEnd))
+                            i = capEnd;
+                        else
+                            i = actions.Count;
+                        continue;
+                    }
+                    // Delay BEFORE the probe, PER ITERATION — double duty: the If's "let the
+                    // screen settle before checking" plus the pacing between iterations.
+                    int whileDelay = Math.Max(0, action.Delay);
+                    if (_useDelayVariation && _delayVariationPercent > 0 && whileDelay > 0)
+                    {
+                        int variation = whileDelay * _delayVariationPercent / 100;
+                        whileDelay += Random.Shared.Next(-variation, variation + 1);
+                        whileDelay = Math.Max(0, whileDelay);
+                    }
+                    if (whileDelay > 0)
+                    {
+                        try { await Task.Delay(whileDelay, token); }
+                        catch (OperationCanceledException) { break; }
+                    }
+                    dispatcherQueue.TryEnqueue(() => OnActionExecuting?.Invoke(action));
+                    // Filed BEFORE the probe (the If row's reason): a report pulled while a
+                    // timed guard is polling shows the iteration it is stuck on. One record
+                    // PER PROBE — the report's 500-cap keeps an infinite loop from flooding
+                    // it (accepted degradation: past the cap only the counter bumps).
+                    var whileRec = new RunStepRecord
+                    {
+                        Row = i + 1,
+                        Profile = CurrentExecutingProfileName,
+                        ActionType = "While",
+                        Detail = _runStepsFull ? null : DescribeIfDetail(action, null),
+                    };
+                    var whileWatch = System.Diagnostics.Stopwatch.StartNew();
+                    RecordRunStep(whileRec);
+                    bool loopTrue;
+                    try { loopTrue = await EvaluateConditionWithTimeout(action, token); }
+                    catch (OperationCanceledException) { whileRec.Status = "skipped"; whileWatch.Stop(); whileRec.DurationMs = whileWatch.ElapsedMilliseconds; break; }
+                    catch (Exception ex)
+                    {
+                        // Probe error under IfOnProbeError == "Halt" rethrows (the If
+                        // contract). TreatAsFalse never reaches here — InstantProbe swallows
+                        // and returns ConditionNegate: an UN-negated guard reads false and
+                        // exits the loop; a NEGATED guard ("While NOT x") reads true on a
+                        // broken probe and keeps looping — bounded by the iteration ceiling,
+                        // mirroring the If's IFNOT-on-probe-error semantics, but not "safe
+                        // by construction". The ceiling is the actual net.
+                        whileRec.Status = "failed";
+                        whileRec.ErrorMessage = ex.Message;
+                        whileWatch.Stop();
+                        whileRec.DurationMs = whileWatch.ElapsedMilliseconds;
+                        // Inline ForEachRow + skip policy: a thrown probe error is a ROW error
+                        // (the sub-over-data catch treats it the same) — soften to a fault so
+                        // the loop-top absorb reenters on the next data row instead of the
+                        // whole run dying (the restore net runs BEFORE the caller's filter
+                        // sees the exception, so StartAsync's skip catch can't help here).
+                        if (feActive.Count > 0
+                            && string.Equals(_dataTable?.OnRowError, "skip", StringComparison.OrdinalIgnoreCase))
+                        {
+                            FaultRow(ex.Message);
+                            continue;
+                        }
+                        throw;
+                    }
+                    whileWatch.Stop();
+                    whileRec.DurationMs = whileWatch.ElapsedMilliseconds;
+                    whileRec.Status = "ok";      // the PROBE ran; false is an answer (loop exit)
+                    if (!_runStepsFull) whileRec.Detail = DescribeIfDetail(action, loopTrue);
+                    if (action.ConditionTimeout > 0)
+                        nextTickMs = sw.ElapsedMilliseconds;   // timed probe = wait-class resync
+                    if (!loopTrue)
+                    {
+                        loopIterations.Remove(i);   // next ACTIVATION starts from zero
+                        if (map.EndLoopOf.TryGetValue(i, out int exitEnd))
+                            i = exitEnd;            // for's i++ lands after the EndLoop
+                        else
+                            i = actions.Count;      // unmatched opener (hand-fed list) — bail
+                        continue;
+                    }
+                    loopIterations[i] = done + 1;
+                    continue;   // TRUE → body starts at i+1
+                }
+                if (string.Equals(action.ActionType, "EndLoop", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Back edge. Orphan (no opener in the map) = pure no-op, mirroring the
+                    // validator's removal posture. The deadline RESYNCS before the jump —
+                    // without it, iteration 2's first delay would be measured against
+                    // iteration 1's deadline and compress to zero.
+                    if (map.LoopStartOf.TryGetValue(i, out int openIdx))
+                    {
+                        nextTickMs = sw.ElapsedMilliseconds;
+                        i = openIdx - 1;   // for's i++ lands ON the opener (re-probe / next row)
+                    }
+                    continue;
+                }
+                if (string.Equals(action.ActionType, "BreakLoop", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Jump PAST the innermost loop's EndLoop. IsSkipped = the jump doesn't
+                    // fire; orphans (no enclosing loop) are no-ops. Kind-dispatched exit: a
+                    // While resets its counter, a ForEachRow restores its data context. No
+                    // run-report record (parity with Else — pure jumps stay out of the cap).
+                    if (!action.IsSkipped
+                        && map.EnclosingLoopOf.TryGetValue(i, out var encB)
+                        && map.EndLoopOf.TryGetValue(encB.OpenIdx, out int breakEnd))
+                    {
+                        if (encB.Kind == BlockKind.ForEachRow)
+                        {
+                            if (feState.TryGetValue(encB.OpenIdx, out var bfe))
+                                ExitForEachFrame(encB.OpenIdx, bfe);
+                        }
+                        else
+                        {
+                            loopIterations.Remove(encB.OpenIdx);
+                        }
+                        i = breakEnd;   // for's i++ lands after the EndLoop
+                    }
+                    continue;
+                }
+                if (string.Equals(action.ActionType, "ContinueLoop", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Jump to the innermost loop's opener: a While re-probes, a ForEachRow
+                    // stamps the NEXT row for free (reentry advances the cursor). Resync
+                    // first — the jump consumes no schedule.
+                    if (!action.IsSkipped && map.EnclosingLoopOf.TryGetValue(i, out var encC))
+                    {
+                        nextTickMs = sw.ElapsedMilliseconds;
+                        i = encC.OpenIdx - 1;
+                    }
+                    continue;
+                }
+                if (string.Equals(action.ActionType, "ForEachRow", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (action.IsSkipped)
+                    {
+                        // The run list is a SHALLOW copy — item properties are live, so a
+                        // mid-block skip toggle can land here with an ACTIVE frame. Exit it
+                        // first: without the restore, _dataLoopOver/_currentRowData leak past
+                        // the jump and the loop-top skip-absorb can teleport execution
+                        // backward into the disabled block.
+                        if (feState.TryGetValue(i, out var skippedFrame))
+                            ExitForEachFrame(i, skippedFrame);
+                        RecordRunStep(new RunStepRecord
+                        {
+                            Row = i + 1,
+                            Profile = CurrentExecutingProfileName,
+                            ActionType = "ForEachRow",
+                            Detail = _runStepsFull ? null : "skipped block",
+                            Status = "skipped",
+                        });
+                        if (map.EndLoopOf.TryGetValue(i, out int feSkipEnd))
+                            i = feSkipEnd;
+                        else
+                            i = actions.Count;
+                        continue;
+                    }
+                    if (!feState.TryGetValue(i, out var fe))
+                    {
+                        // ACTIVATION. The table is the AMBIENT context (_dataTable): inside a
+                        // sub running over-data that is the sub's own table; a plain
+                        // RunProfile call inherits the caller's ("to iterate the sub's own
+                        // table, use RunProfile → run once per data row"). Empty/missing
+                        // table → block skipped with one honest record, never an error.
+                        int rowsNow = _dataTable?.Rows?.Count ?? 0;
+                        if (rowsNow == 0)
+                        {
+                            Services.DiagnosticLog.Warn("For Each Data Row: no data rows in the active table — block skipped");
+                            RecordRunStep(new RunStepRecord
+                            {
+                                Row = i + 1,
+                                Profile = CurrentExecutingProfileName,
+                                ActionType = "ForEachRow",
+                                Detail = _runStepsFull ? null : "no data rows",
+                                Status = "skipped",
+                            });
+                            if (map.EndLoopOf.TryGetValue(i, out int feEmptyEnd))
+                                i = feEmptyEnd;
+                            else
+                                i = actions.Count;
+                            continue;
+                        }
+                        fe = new ForEachFrame { Saved = SaveDataContext(swapRowNextCursors: false) };
+                        feState[i] = fe;
+                        feActive.Add(i);   // outermost FIRST — the restore net uses [0]
+                        // Fault sites read the ACTIVE table's skip policy while inside the
+                        // block (the sub-over-data mold); the {row:col} stamping below does
+                        // the rest. {rownext} cursors are NOT swapped — same table, same walk.
+                        _dataLoopOver = true;
+                        // ONE record per ACTIVATION, never per row (the 500-cap would drown).
+                        RecordRunStep(new RunStepRecord
+                        {
+                            Row = i + 1,
+                            Profile = CurrentExecutingProfileName,
+                            ActionType = "ForEachRow",
+                            Detail = _runStepsFull ? null : $"over {rowsNow} data row(s)",
+                            Status = "ok",
+                        });
+                    }
+                    // (RE)ENTRY — the row count is RE-READ every pass: the Data panel edits
+                    // live, and a stale count would index past a shrunken table.
+                    int rowCount = _dataTable?.Rows?.Count ?? 0;
+                    if (fe.Cursor >= rowCount)
+                    {
+                        ExitForEachFrame(i, fe);
+                        if (map.EndLoopOf.TryGetValue(i, out int feDoneEnd))
+                            i = feDoneEnd;
+                        else
+                            i = actions.Count;
+                        continue;
+                    }
+                    _currentRowData = BuildRowDict(_dataTable!, fe.Cursor);
+                    fe.Cursor++;   // advanced at STAMP time — a skip-absorb reentry is already "next row"
+                    PushVariablesSnapshot();
+                    nextTickMs = sw.ElapsedMilliseconds;   // fresh row, fresh schedule
+                    continue;
                 }
 
                 if (action.IsSkipped) continue;
@@ -2953,7 +3432,12 @@ namespace TrueReplayer.Services
                 {
                     // Record the STRUCTURED diagnosis before it is flattened into a message string
                     // higher up. Rethrow untouched — the failure policy above this frame is what
-                    // decides whether the run halts or the data-loop row is skipped.
+                    // decides whether the run halts or the data-loop row is skipped. The ONE
+                    // exception: inside an inline ForEachRow whose table policy is skip, a thrown
+                    // error IS the row's failure (the sub-over-data catch treats it the same) and
+                    // the frame's restore net would fire BEFORE any caller's filter could see the
+                    // hoisted state — so it softens to a row fault here, and the loop-top absorb
+                    // reenters on the next data row.
                     stepRec.Status = "failed";
                     stepRec.ErrorCode = bex.Code;
                     stepRec.ErrorMessage = bex.Message;
@@ -2963,7 +3447,11 @@ namespace TrueReplayer.Services
                     // Null on a timeout, where the extension never answered and there is honestly
                     // no page to name.
                     stepRec.TabUrl = bex.TabUrl;
-                    throw;
+                    if (feActive.Count > 0
+                        && string.Equals(_dataTable?.OnRowError, "skip", StringComparison.OrdinalIgnoreCase))
+                        FaultRow(bex.Message);
+                    else
+                        throw;
                 }
                 catch (OperationCanceledException)
                 {
@@ -2974,7 +3462,12 @@ namespace TrueReplayer.Services
                 {
                     stepRec.Status = "failed";
                     stepRec.ErrorMessage = ex.Message;
-                    throw;
+                    // Same inline-ForEachRow softening as the BrowserActionException arm above.
+                    if (feActive.Count > 0
+                        && string.Equals(_dataTable?.OnRowError, "skip", StringComparison.OrdinalIgnoreCase))
+                        FaultRow(ex.Message);
+                    else
+                        throw;
                 }
                 finally
                 {
@@ -3323,11 +3816,11 @@ namespace TrueReplayer.Services
             string subName, List<ActionItem> subActions, Models.ProfileDataTable subTable, CancellationToken token)
         {
             bool parentSkipActive = SkipRowOnErrorActive;
-            var savedTable = _dataTable;
-            bool savedLoopOver = _dataLoopOver;
-            var savedRowData = _currentRowData;
-            var savedRowNextCursors = _rowNextCursors;   // {rownext} walks the SUB's table on a fresh cursor
-            bool savedSoftOverride = _softFaultOverride;
+            // ONE shared save/restore with the inline ForEachRow block (DataCtxSnapshot) —
+            // the field-by-field copies this used to keep are exactly the kind of sibling
+            // pair that drifts. swapRowNextCursors: {rownext} walks the SUB's table on a
+            // fresh cursor, so the parent's walk is preserved and restored verbatim.
+            var savedCtx = SaveDataContext(swapRowNextCursors: true);
             bool subSkip = string.Equals(subTable.OnRowError, "skip", StringComparison.OrdinalIgnoreCase);
             int rowCount = subTable.Rows?.Count ?? 0;
             int skipped = 0;
@@ -3406,12 +3899,7 @@ namespace TrueReplayer.Services
             }
             finally
             {
-                _dataTable = savedTable;
-                _dataLoopOver = savedLoopOver;
-                _currentRowData = savedRowData;
-                _rowNextCursors = savedRowNextCursors;   // restore the parent's {rownext} walk verbatim
-                _softFaultOverride = savedSoftOverride;
-                PushVariablesSnapshot();   // live pane: back on the parent's row
+                RestoreDataContext(savedCtx);   // parent table/flag/row/{rownext}/soft-override, one unit
             }
         }
 

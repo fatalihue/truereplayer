@@ -103,6 +103,9 @@ export interface ActionItem {
   // Optional poll timeout (ms) for the IF condition. 0/undefined = instant single check (branch
   // immediately). > 0 = poll up to N ms for the (negate-applied) condition to become true, then branch.
   conditionTimeout?: number;
+  // While-loop iteration ceiling (actionType === 'While'). 0/undefined = the engine's
+  // 1000-iteration safety default; reaching it exits the loop as a normal "ok".
+  loopMaxIterations?: number;
   // null/undefined = "TreatAsFalse" (probe exception → walk FALSE branch). "Halt"
   // rethrows and stops replay. Mirrors waitImageOnTimeout's vocabulary.
   ifOnProbeError?: string | null;
@@ -995,6 +998,14 @@ export type OutgoingMessage =
   // + body + ENDIF). Wired from the row-actions menu's Delete on IF rows so deleting an
   // IF alone never orphans its body. PushUndoState fires so the deletion is reversible.
   | { type: 'actions:deleteConditional'; payload: { ifRowIndex: number } }
+  // Loop blocks — insert {While, EndLoop} (capture-first for Image/Pixel guards, direct +
+  // Sheet for the state families; Random is deliberately NOT offered: a coin-flip loop
+  // guard has no stable ending) or {ForEachRow, EndLoop} (kind: 'ForEachRow'; ignores
+  // conditionType, nothing to configure so no Sheet auto-open).
+  | { type: 'actions:insertLoop'; payload: { conditionType?: 'ImageFound' | 'PixelColorMatch' | 'WindowOpen' | 'ClipboardMatch' | 'BrowserElementState' | 'Variable' | 'ProcessRunning' | 'FileExists' | 'TimeWindow'; insertIndex: number; kind?: 'While' | 'ForEachRow' } }
+  // Delete the entire loop block (opener + body + EndLoop) — deleteConditional's mirror
+  // with a kind-aware scan (both loop openers deepen, only EndLoop pops).
+  | { type: 'actions:deleteLoop'; payload: { loopRowIndex: number } }
   // Insert a single Keystroke action (atomic combo like "Alt+Tab", "Ctrl+Shift+T").
   // Unlike insertKey which expands a single tap into a KeyDown+KeyUp pair, insertKeystroke
   // creates ONE row holding the whole combo as a "+"-joined string. The replay engine

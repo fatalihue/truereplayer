@@ -6,7 +6,7 @@ import type { CollisionDetection, DragStartEvent, DragEndEvent } from '@dnd-kit/
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { snapCenterToCursor } from '@dnd-kit/modifiers';
 import { CSS } from '@dnd-kit/utilities';
-import { Mouse, MousePointerClick, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, ChevronDown, ChevronsDownUp, ChevronsUpDown, Plus, Pencil, ScanSearch, Pipette, Globe, CheckCheck, Check, Code2, Files, Hourglass, Repeat2, ExternalLink, Crosshair, Link, GripVertical, Timer, GitBranch, ArrowRightLeft, Combine, Split, MoreHorizontal, Focus, Braces, AppWindow, Clipboard, ClipboardCopy, Play, Pause, EyeOff, RotateCcw, Dice5, Cpu, FileCheck, Clock, ShieldCheck, CircleStop, CornerDownLeft } from 'lucide-react';
+import { Mouse, MousePointerClick, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, ChevronDown, ChevronsDownUp, ChevronsUpDown, Plus, Pencil, ScanSearch, Pipette, Globe, CheckCheck, Check, Code2, Files, Hourglass, Repeat2, ExternalLink, Crosshair, Link, GripVertical, Timer, GitBranch, ArrowRightLeft, Combine, Split, MoreHorizontal, Focus, Braces, AppWindow, Clipboard, ClipboardCopy, Play, Pause, EyeOff, RotateCcw, Dice5, Cpu, FileCheck, Clock, ShieldCheck, CircleStop, CornerDownLeft, IterationCw, ChevronUp, ArrowRightFromLine, SkipForward, Table2 } from 'lucide-react';
 import { canCollapse, canExpand, expandKeystroke } from '../utils/keyRepeat';
 import type { ActionItem } from '../bridge/messageTypes';
 import { useAppState, useHighlightedAction } from '../state/AppStateContext';
@@ -39,7 +39,10 @@ import { useContextMenuPosition } from '../hooks/useContextMenuPosition';
 // keeps it 0, and bulk "set delay" skips them. The opening IF is deliberately NOT here: it runs a
 // probe, so its delay is a meaningful "wait for the condition to settle before checking" knob
 // (applied before the probe in the engine) and is editable like any other action's delay.
-const NO_DELAY_TYPES = new Set(['Else', 'EndIf']);
+// Pure jump markers with no replay delay (the load-time validator zeroes them). The
+// opening If and While are NOT here — their delay is the pre-probe settle knob (per
+// iteration on a While).
+const NO_DELAY_TYPES = new Set(['Else', 'EndIf', 'EndLoop', 'BreakLoop', 'ContinueLoop', 'ForEachRow']);
 
 // Per-nesting-level colour ("rainbow brackets") so a nested block reads apart from its parent.
 // Level 0 keeps the user's configurable IF colour, so a single-level block looks exactly as before;
@@ -96,6 +99,13 @@ export function ActionIcon({ actionType, size = 12 }: { actionType: string; size
   // "chip reads the same as the entry that inserts it" rule above.
   if (actionType === 'Stop') return <CircleStop size={size} />;
   if (actionType === 'Return') return <CornerDownLeft size={size} />;
+  // Loop family — IterationCw matches the Loop ▾ trigger; EndLoop closes upward (the
+  // back edge), Break exits rightward, Next skips forward, ForEachRow is the table.
+  if (actionType === 'While') return <IterationCw size={size} />;
+  if (actionType === 'EndLoop') return <ChevronUp size={size} />;
+  if (actionType === 'BreakLoop') return <ArrowRightFromLine size={size} />;
+  if (actionType === 'ContinueLoop') return <SkipForward size={size} />;
+  if (actionType === 'ForEachRow') return <Table2 size={size} />;
   return <Zap size={size} />;
 }
 
@@ -180,17 +190,56 @@ function actionPillLabel(action: ActionItem): string {
     // Flow leaves share the keyword register: they are control flow, not gestures.
     case 'Stop': return 'stop';
     case 'Return': return 'return';
+    // Loop family — same lowercase keyword register as the conditional block.
+    case 'While': return 'while';
+    case 'EndLoop': return 'end loop';
+    case 'BreakLoop': return 'break';
+    case 'ContinueLoop': return 'next';
+    case 'ForEachRow': return 'each row';
     default: return action.actionType;
   }
 }
 
-// Whether a row is an image/pixel PROBE — the standalone Wait actions or an IF
+// Whether a row is an image/pixel PROBE — the standalone Wait actions or an If/While
 // whose condition uses one of those probes. These share a unified Details payload
-// (ProbeDetails) so an image probe looks the same whether it's a Wait or an If.
+// (ProbeDetails) so an image probe looks the same whether it's a Wait, an If or a loop guard.
 function isProbeAction(action: ActionItem): boolean {
   return action.actionType === 'WaitImage'
     || action.actionType === 'WaitPixelColor'
-    || (action.actionType === 'If' && (action.conditionType === 'ImageFound' || action.conditionType === 'PixelColorMatch'));
+    || ((action.actionType === 'If' || action.actionType === 'While')
+      && (action.conditionType === 'ImageFound' || action.conditionType === 'PixelColorMatch'));
+}
+
+// The While iteration ceiling as a quiet suffix beside whatever Details payload the row
+// renders. ProbeDetails/ConditionDetails WIN the cell for condition-bearing rows, so the
+// ceiling rides along here — the displayKey path (which also appends it) is only reached
+// by While rows whose condition family carries no Details payload.
+function whileCapSuffix(action: ActionItem): ReactNode {
+  if (action.actionType !== 'While' || !action.loopMaxIterations || action.loopMaxIterations <= 0) return null;
+  return <span className="ml-1.5 text-[10px] text-text-tertiary align-middle">≤{action.loopMaxIterations}×</span>;
+}
+
+// The condition's primary identifier for the grid cell — shared by If, While and Assert
+// (all three carry the same ConditionType payload). Mirrors the C# DisplayKey getter so a
+// backend push and a frontend re-render produce the same string. Color swatch / NOT badge
+// are rendered separately as DOM nodes (they're not plain text). State families that carry
+// their value in ConditionDetails (Variable, Process, File, Time, Random) return '' here.
+function conditionSummary(action: ActionItem): string {
+  if (action.conditionType === 'ImageFound') {
+    const p = action.imagePath || '';
+    if (!p) return '';
+    const cut = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'));
+    return cut >= 0 ? p.slice(cut + 1) : p;
+  }
+  if (action.conditionType === 'PixelColorMatch') return action.pixelColor || '';
+  if (action.conditionType === 'WindowOpen') {
+    const proc = action.windowProcessName || '';
+    const title = action.windowTitle || '';
+    return proc && title ? `${proc} · ${title}` : (proc || title);
+  }
+  if (action.conditionType === 'ClipboardMatch') return action.clipboardPattern || '';
+  if (action.conditionType === 'BrowserElementState') return action.key || '';
+  return '';
 }
 
 // Render a Details string, styling any "<n> ms" run to MATCH the Delay column:
@@ -243,7 +292,9 @@ function renderMsDetail(text: string, language: Language): ReactNode {
 // Sheet panel respectively — to keep this cell to just "what is matched".)
 function ProbeDetails({ action }: { action: ActionItem }) {
   const tt = useTt();
-  const isIf = action.actionType === 'If';
+  // While guards carry the same probe payload as If and get the same type tag (their
+  // pill is the generic "while", so the tag says WHAT the guard watches).
+  const isIf = action.actionType === 'If' || action.actionType === 'While';
   const isImage = action.actionType === 'WaitImage'
     || (isIf && action.conditionType === 'ImageFound');
 
@@ -297,7 +348,7 @@ function isConditionAction(action: ActionItem): boolean {
   // Desktop Assert carries the same ConditionType payload as an If, so it reuses this exact
   // "type tag + value" summary — the grid then reads WHAT is being checked identically for
   // both, and only the Action pill says whether it branches or requires.
-  return (action.actionType === 'If' || action.actionType === 'Assert')
+  return (action.actionType === 'If' || action.actionType === 'Assert' || action.actionType === 'While')
     && (action.conditionType === 'WindowOpen'
       || action.conditionType === 'ClipboardMatch'
       || action.conditionType === 'BrowserElementState'
@@ -321,7 +372,7 @@ function isConditionAction(action: ActionItem): boolean {
 // since actionType alone doesn't distinguish them (an If-ImageFound and an If-ClipboardMatch
 // share actionType 'If').
 function similarActionKey(action: ActionItem): string {
-  const conditionType = (action.actionType === 'If' || action.actionType === 'Assert') ? action.conditionType : null;
+  const conditionType = (action.actionType === 'If' || action.actionType === 'Assert' || action.actionType === 'While') ? action.conditionType : null;
   if (action.actionType === 'WaitImage' || conditionType === 'ImageFound') {
     return `image:${action.imagePath ?? ''}`;
   }
@@ -509,39 +560,55 @@ export function ActionTable({ columnVisibility, onOpenSheet, onPickCoords }: Act
   const blockInfo = useMemo(() => {
     const n = actions.length;
     const depth = new Array<number>(n).fill(0);
-    const blockIfOf = new Array<number | null>(n).fill(null);
-    const endIfOf = new Map<number, number>();
+    // blockOpenerOf (né blockIfOf): the containing block may now be a loop, so the name
+    // says what it holds. TYPED stack: Else/EndIf only pair with an If on top, EndLoop
+    // only with a loop opener — a crossed hand-edited pair can't mis-nest the rails.
+    // Depth stays FAMILY-BLIND on purpose: rails encode nesting, not block kind.
+    const blockOpenerOf = new Array<number | null>(n).fill(null);
+    const closerOf = new Map<number, number>();
     const hasElse = new Set<number>();
-    const stack: number[] = [];
+    const stack: { kind: 'If' | 'Loop'; idx: number }[] = [];
     for (let i = 0; i < n; i++) {
       const t = actions[i].actionType;
       if (t === 'If') {
-        stack.push(i);
+        stack.push({ kind: 'If', idx: i });
         depth[i] = stack.length - 1;
-        blockIfOf[i] = i; // IF row self-references for skip propagation
+        blockOpenerOf[i] = i; // opener rows self-reference for skip propagation
+      } else if (t === 'While' || t === 'ForEachRow') {
+        stack.push({ kind: 'Loop', idx: i });
+        depth[i] = stack.length - 1;
+        blockOpenerOf[i] = i;
       } else if (t === 'Else') {
-        if (stack.length) {
-          const ifIdx = stack[stack.length - 1];
+        if (stack.length && stack[stack.length - 1].kind === 'If') {
+          const ifIdx = stack[stack.length - 1].idx;
           depth[i] = stack.length - 1;
-          blockIfOf[i] = ifIdx;
+          blockOpenerOf[i] = ifIdx;
           hasElse.add(ifIdx);
         }
       } else if (t === 'EndIf') {
-        if (stack.length) {
-          const ifIdx = stack[stack.length - 1];
+        if (stack.length && stack[stack.length - 1].kind === 'If') {
+          const ifIdx = stack[stack.length - 1].idx;
           depth[i] = stack.length - 1;
-          blockIfOf[i] = ifIdx;
-          endIfOf.set(ifIdx, i);
+          blockOpenerOf[i] = ifIdx;
+          closerOf.set(ifIdx, i);
+          stack.pop();
+        }
+      } else if (t === 'EndLoop') {
+        if (stack.length && stack[stack.length - 1].kind === 'Loop') {
+          const openIdx = stack[stack.length - 1].idx;
+          depth[i] = stack.length - 1;
+          blockOpenerOf[i] = openIdx;
+          closerOf.set(openIdx, i);
           stack.pop();
         }
       } else {
-        // Non-structural body row — depth equals the number of currently-open IFs,
-        // and the containing block is the innermost open IF (top of stack).
+        // Non-structural body row — depth equals the number of currently-open blocks,
+        // and the containing block is the innermost open opener (top of stack).
         depth[i] = stack.length;
-        if (stack.length) blockIfOf[i] = stack[stack.length - 1];
+        if (stack.length) blockOpenerOf[i] = stack[stack.length - 1].idx;
       }
     }
-    return { depth, blockIfOf, endIfOf, hasElse };
+    return { depth, blockOpenerOf, closerOf, hasElse };
   }, [actions]);
 
   // Block-snap a selection ONLY when it includes a structural marker (If/Else/EndIf): a selection
@@ -957,6 +1024,9 @@ export function ActionTable({ columnVisibility, onOpenSheet, onPickCoords }: Act
       const sel = Array.from(selectedIndices);
       if (sel.length === 1 && actions[sel[0]]?.actionType === 'If') {
         send({ type: 'actions:deleteConditional', payload: { ifRowIndex: sel[0] } });
+      } else if (sel.length === 1 && (actions[sel[0]]?.actionType === 'While' || actions[sel[0]]?.actionType === 'ForEachRow')) {
+        // Lone loop opener → the whole block goes, same never-orphan rule as the If.
+        send({ type: 'actions:deleteLoop', payload: { loopRowIndex: sel[0] } });
       } else {
         send({ type: 'actions:delete', payload: { indices: snapSelectionToBlocks(sel) } });
       }
@@ -1411,8 +1481,10 @@ export function ActionTable({ columnVisibility, onOpenSheet, onPickCoords }: Act
     // The backend inserts the clones right after the last source row — i.e. immediately after
     // the block's EndIf — yielding a valid SIBLING block (still inside any enclosing block).
     let indices = sel;
-    if (sel.length === 1 && actions[sel[0]]?.actionType === 'If') {
-      const end = blockInfo.endIfOf.get(sel[0]);
+    const loneType = sel.length === 1 ? actions[sel[0]]?.actionType : undefined;
+    if (loneType === 'If' || loneType === 'While' || loneType === 'ForEachRow') {
+      // A lone opener of EITHER family clones exactly its own block, [opener..closerOf].
+      const end = blockInfo.closerOf.get(sel[0]);
       if (end != null) indices = Array.from({ length: end - sel[0] + 1 }, (_, k) => sel[0] + k);
     } else {
       indices = snapSelectionToBlocks(sel);
@@ -1433,6 +1505,12 @@ export function ActionTable({ columnVisibility, onOpenSheet, onPickCoords }: Act
       const idx = indices[0];
       if (actions[idx]?.actionType === 'If') {
         send({ type: 'actions:deleteConditional', payload: { ifRowIndex: idx } });
+        setSelectedIndices(new Set());
+        closeContextMenu();
+        return;
+      }
+      if (actions[idx]?.actionType === 'While' || actions[idx]?.actionType === 'ForEachRow') {
+        send({ type: 'actions:deleteLoop', payload: { loopRowIndex: idx } });
         setSelectedIndices(new Set());
         closeContextMenu();
         return;
@@ -1667,35 +1745,23 @@ export function ActionTable({ columnVisibility, onOpenSheet, onPickCoords }: Act
                         if (hasTimeout) return `${ms} ms`;
                         return '—';
                       })()
-                    : action.actionType === 'If'
+                    : (action.actionType === 'If' || action.actionType === 'Assert')
+                      // If/Assert share the condition-identifier summary (Assert used to
+                      // fall through to getDisplayKey(key) and leak the raw selector).
+                      ? conditionSummary(action)
+                    : action.actionType === 'While'
                       ? (() => {
-                          // IF rows show the condition's primary identifier — image
-                          // filename or pixel hex. Mirrors the C# DisplayKey getter so
-                          // a backend push and a frontend re-render produce the same
-                          // string. Color swatch / NOT badge are rendered separately
-                          // below as DOM nodes (they're not plain text).
-                          if (action.conditionType === 'ImageFound') {
-                            const p = action.imagePath || '';
-                            if (!p) return '';
-                            const cut = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'));
-                            return cut >= 0 ? p.slice(cut + 1) : p;
-                          }
-                          if (action.conditionType === 'PixelColorMatch') {
-                            return action.pixelColor || '';
-                          }
-                          if (action.conditionType === 'WindowOpen') {
-                            const proc = action.windowProcessName || '';
-                            const title = action.windowTitle || '';
-                            return proc && title ? `${proc} · ${title}` : (proc || title);
-                          }
-                          if (action.conditionType === 'ClipboardMatch') {
-                            return action.clipboardPattern || '';
-                          }
-                          if (action.conditionType === 'BrowserElementState') {
-                            return action.key || '';
-                          }
-                          return '';
+                          // Same condition summary as If, plus the iteration ceiling when
+                          // one is set — "the loop's shape" reads from the grid.
+                          const base = conditionSummary(action);
+                          const cap = action.loopMaxIterations && action.loopMaxIterations > 0
+                            ? `≤${action.loopMaxIterations}×` : '';
+                          return base && cap ? `${base} · ${cap}` : (base || cap);
                         })()
+                    : action.actionType === 'ForEachRow'
+                      // LIVE row count — the Data panel edits while you look, and a stale
+                      // number here would misstate what the block will do.
+                      ? `${dataTable.rows.length} row${dataTable.rows.length === 1 ? '' : 's'}`
                       : action.actionType === 'HoldKey'
                         // Hold Key reads like Pause: "<key> / <ms> ms" as plain text in the
                         // cell (no separate duration chip) so the two duration-bearing actions
@@ -1743,11 +1809,11 @@ export function ActionTable({ columnVisibility, onOpenSheet, onPickCoords }: Act
               const displayY = getDisplayY(action);
 
               const isDragged = dragIndexSet?.has(idx) ?? false;
-              // Skip propagation: when an IF row carries IsSkipped, every row inside
-              // that block (body + ELSE + matching ENDIF) renders dimmed (opacity-40)
-              // too. blockIfOf points to the containing IF; self-references on the IF
-              // row mean its own isSkipped already covers it.
-              const blockIf = blockInfo.blockIfOf[idx];
+              // Skip propagation: when an opener row (If / While / ForEachRow) carries
+              // IsSkipped, every row inside its block renders dimmed (opacity-40) too.
+              // blockOpenerOf points to the containing opener; self-references on the
+              // opener row mean its own isSkipped already covers it.
+              const blockIf = blockInfo.blockOpenerOf[idx];
               const isInSkippedBlock = blockIf !== null && actions[blockIf]?.isSkipped === true;
               const isSkipped = action.isSkipped || isInSkippedBlock;
               // Profile-drag insertion preview — rows at/below the drop position
@@ -1759,10 +1825,12 @@ export function ActionTable({ columnVisibility, onOpenSheet, onPickCoords }: Act
                 ? 'transform 150ms cubic-bezier(0.2, 0, 0, 1)'
                 : undefined;
 
-              // Conditional structural rows (If / Else / EndIf) carry their own scope
-              // rail in addition to any outer-block rails, get a subtle tinted bg, and
-              // anchor the "+ Add Else" ghost row injected below.
-              const isStructural = action.actionType === 'If' || action.actionType === 'Else' || action.actionType === 'EndIf';
+              // Structural rows of BOTH families (If/Else/EndIf and While/ForEachRow/EndLoop)
+              // carry their own scope rail in addition to any outer-block rails, get a subtle
+              // tinted bg, and (If only) anchor the "+ Add Else" ghost row injected below.
+              // Rails keep encoding DEPTH, not family — BLOCK_LEVEL_COLORS untouched.
+              const isStructural = action.actionType === 'If' || action.actionType === 'Else' || action.actionType === 'EndIf'
+                || action.actionType === 'While' || action.actionType === 'ForEachRow' || action.actionType === 'EndLoop';
               const depth = blockInfo.depth[idx] || 0;
               // Body rows of a conditional block (depth ≥ 1, non-structural) get a
               // softer wash of the same IF hue so the whole block reads as one band,
@@ -1800,15 +1868,17 @@ export function ActionTable({ columnVisibility, onOpenSheet, onPickCoords }: Act
               // avoid mid-run mutations.
               const showAddElseBefore = action.actionType === 'EndIf'
                 && blockIf !== null
+                && actions[blockIf]?.actionType === 'If'   // typed stack makes this a tautology; belt for hand-fed lists
                 && !blockInfo.hasElse.has(blockIf);
               const addElseDepth = showAddElseBefore && blockIf !== null ? blockInfo.depth[blockIf] : 0;
 
-              // Else / EndIf rows can't be dragged on their own — structural markers
-              // bound to their parent IF; moving them in isolation would orphan the
-              // block. (Dragging the IF row carries the whole block instead.)
+              // Else / EndIf / EndLoop rows can't be dragged on their own — structural
+              // markers bound to their opener; moving one in isolation would orphan the
+              // block. (Dragging the opener row carries the whole block instead.)
               const rowSortDisabled = !isDraggable
                 || action.actionType === 'Else'
-                || action.actionType === 'EndIf';
+                || action.actionType === 'EndIf'
+                || action.actionType === 'EndLoop';
 
               return (
                 <SortableRowShell key={action.id ?? idx} id={action.id ?? `row-${idx}`} disabled={rowSortDisabled}>
@@ -2037,7 +2107,7 @@ export function ActionTable({ columnVisibility, onOpenSheet, onPickCoords }: Act
                       {/* Assert carries the same conditionNegate and it matters MORE there: an If
                           shows both outcomes in the block below it, but "require X" and "require
                           NOT X" are opposite guards that would otherwise render identically. */}
-                      {(action.actionType === 'If' || action.actionType === 'Assert') && action.conditionNegate && (
+                      {(action.actionType === 'If' || action.actionType === 'Assert' || action.actionType === 'While') && action.conditionNegate && (
                         <span
                           className="ml-0.5 px-1 rounded text-[9px] font-bold tracking-wider"
                           style={{ background: 'var(--color-action-if-fg)', color: 'var(--color-bg-surface)' }}
@@ -2135,11 +2205,11 @@ export function ActionTable({ columnVisibility, onOpenSheet, onPickCoords }: Act
                         className="w-[220px] h-6 px-1 text-xs font-mono text-accent-light bg-bg-input border border-accent-solid rounded outline-none placeholder:text-accent-light/50 animate-pulse"
                       />
                     ) : isProbeAction(action) ? (
-                      // Image/pixel probe (Wait* or If) — unified payload, no GUID.
-                      <ProbeDetails action={action} />
+                      // Image/pixel probe (Wait* or If/While) — unified payload, no GUID.
+                      <><ProbeDetails action={action} />{whileCapSuffix(action)}</>
                     ) : isConditionAction(action) ? (
-                      // Window / Clipboard / Browser-Element If — icon tag + value.
-                      <ConditionDetails action={action} />
+                      // Window / Clipboard / Browser-Element If/While — icon tag + value.
+                      <><ConditionDetails action={action} />{whileCapSuffix(action)}</>
                     ) : (<>
                     {displayKey ? (
                       <span
