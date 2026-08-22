@@ -70,7 +70,13 @@ const familyTypes: Record<ActionFamily, { value: string; label: string }[]> = {
 
 // NOTE this is the SHEET's copy; displayUtils has its own for the grid's Details column. Both
 // must list a coordinate-less action or it grows phantom X/Y fields in one surface only.
-const noCoordTypes = new Set(['Assert', 'KeyDown', 'KeyUp', 'Keystroke', 'HoldKey', 'RunProfile', 'ScrollUp', 'ScrollDown', 'SendText', 'SetVariable', 'CopyToSlot', 'ActivateWindow', 'WaitImage', 'WaitPixelColor', 'BrowserClick', 'BrowserRightClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate', 'BrowserSelectOption', 'BrowserAssert', 'Pause', 'If', 'Else', 'EndIf']);
+const noCoordTypes = new Set(['Assert', 'KeyDown', 'KeyUp', 'Keystroke', 'HoldKey', 'RunProfile', 'ScrollUp', 'ScrollDown', 'SendText', 'SetVariable', 'CopyToSlot', 'ActivateWindow', 'WaitImage', 'WaitPixelColor', 'BrowserClick', 'BrowserRightClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate', 'BrowserSelectOption', 'BrowserAssert', 'Pause', 'If', 'Else', 'EndIf', 'Stop', 'Return']);
+
+// One normalizer for the Assert on-fail persistence pair: the default Halt stays ''
+// (null on disk), Continue/StopReplay persist verbatim — mirrors the bridge's
+// actions:edit arm, so the two can never disagree about what "unset" means.
+const persistAssertPolicy = (p: string | null | undefined): string =>
+  p === 'Continue' || p === 'StopReplay' ? p : '';
 
 // Click × N inline repeat — mirrors the Send Keystroke dialog's Press body. Combined single
 // clicks (Left/Right/Middle) AND DoubleClick repeat; paired halves (they'd double-fire one edge)
@@ -308,7 +314,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited, se
   const [captureGeoError, setCaptureGeoError] = useState<string | null>(null);
   // BrowserAssert failure policy (selector/waitMode/browserText/timeout reuse the shared
   // browser state above).
-  const [assertOnFail, setAssertOnFail] = useState<'Halt' | 'Continue'>('Halt');
+  const [assertOnFail, setAssertOnFail] = useState<'Halt' | 'Continue' | 'StopReplay'>('Halt');
   // Exists-anywhere Test probe tracking — same requestId-gating pattern as the browser
   // Test Action (the reply is gated on the id so a stale reply can't land elsewhere).
   const [windowProbeRequestId, setWindowProbeRequestId] = useState<string | null>(null);
@@ -756,7 +762,8 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited, se
       setMatchIndex(String(action.windowMatchIndex && action.windowMatchIndex > 1 ? action.windowMatchIndex : 1));
       setCaptureGeoError(null);
       setCaptureGeoRequestId(null);
-      setAssertOnFail(action.assertOnFail === 'Continue' ? 'Continue' : 'Halt');
+      setAssertOnFail(action.assertOnFail === 'Continue' ? 'Continue'
+        : action.assertOnFail === 'StopReplay' ? 'StopReplay' : 'Halt');
       setWindowProbeResult(null);
       setWindowProbeRequestId(null);
     }
@@ -1128,8 +1135,8 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited, se
       if ((persistedMode || '') !== (action.waitMode || '')) {
         send({ type: 'actions:edit', payload: { index: actionIndex, field: 'waitMode', value: persistedMode } });
       }
-      const persistedPolicy = assertOnFail === 'Continue' ? 'Continue' : '';
-      const currentPolicy = action.assertOnFail === 'Continue' ? 'Continue' : '';
+      const persistedPolicy = persistAssertPolicy(assertOnFail);
+      const currentPolicy = persistAssertPolicy(action.assertOnFail);
       if (persistedPolicy !== currentPolicy) {
         send({ type: 'actions:edit', payload: { index: actionIndex, field: 'assertOnFail', value: persistedPolicy } });
       }
@@ -1138,8 +1145,8 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited, se
     // Desktop Assert shares assertOnFail with BrowserAssert but none of its browser fields,
     // so it gets its own narrow block rather than widening the gate above.
     if (actionType === 'Assert') {
-      const persistedPolicy = assertOnFail === 'Continue' ? 'Continue' : '';
-      const currentPolicy = action.assertOnFail === 'Continue' ? 'Continue' : '';
+      const persistedPolicy = persistAssertPolicy(assertOnFail);
+      const currentPolicy = persistAssertPolicy(action.assertOnFail);
       if (persistedPolicy !== currentPolicy) {
         send({ type: 'actions:edit', payload: { index: actionIndex, field: 'assertOnFail', value: persistedPolicy } });
       }
@@ -1452,16 +1459,16 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited, se
     if (actionType === 'BrowserAssert') {
       const persistedMode = (waitMode === 'appears') ? '' : waitMode;
       if ((persistedMode || '') !== (action.waitMode || '')) return true;
-      const persistedPolicy = assertOnFail === 'Continue' ? 'Continue' : '';
-      const currentPolicy = action.assertOnFail === 'Continue' ? 'Continue' : '';
+      const persistedPolicy = persistAssertPolicy(assertOnFail);
+      const currentPolicy = persistAssertPolicy(action.assertOnFail);
       if (persistedPolicy !== currentPolicy) return true;
     }
 
     // Mirror of the Desktop Assert save block — a reflexive Esc must arm the dirty warning
     // instead of silently dropping an on-failure change.
     if (actionType === 'Assert') {
-      const persistedPolicy = assertOnFail === 'Continue' ? 'Continue' : '';
-      const currentPolicy = action.assertOnFail === 'Continue' ? 'Continue' : '';
+      const persistedPolicy = persistAssertPolicy(assertOnFail);
+      const currentPolicy = persistAssertPolicy(action.assertOnFail);
       if (persistedPolicy !== currentPolicy) return true;
     }
 
@@ -2143,6 +2150,8 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited, se
     : actionType === 'HoldKey' ? 'Hold Key'
     : actionType === 'RunProfile' ? 'Run Profile'
     : actionType === 'Keystroke' ? 'Keystroke'
+    : actionType === 'Stop' ? 'Stop'
+    : actionType === 'Return' ? 'Return'
     : isClickHalf ? `${(clickHalfBase ?? '').replace('Click', '')} Click`
     : actionType;
 
@@ -2154,6 +2163,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited, se
     : actionType === 'Pause' ? 'var(--color-action-pause-fg)'
     : (actionType === 'Keystroke' || actionType === 'KeyDown' || actionType === 'KeyUp' || actionType === 'HoldKey') ? 'var(--color-action-key-fg)'
     : (isIf || isElse || isEndIf) ? 'var(--color-action-if-fg)'
+    : (actionType === 'Stop' || actionType === 'Return') ? 'var(--color-action-flow-fg, var(--color-action-pause-fg))'
     : undefined;
 
   return createPortal(
@@ -2312,10 +2322,13 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited, se
 
             {/* Wait for condition sits next to the Condition toggle — the core branch
                 decision and its timing modifier read as one pair; the flaky-probe fallback
-                (On Probe Error) reads last as the edge case. Hidden for Random (re-rolling
-                every poll until it hits is meaningless) and Time (polling a clock window
-                is surprising) — those are instant-only conditions. */}
-            {!isIfRandom && !isIfTime && (
+                (On Probe Error) reads last as the edge case. Hidden only for Random
+                (re-rolling every poll until it hits is meaningless). Time is NOT hidden
+                any more: the engine polls every family whenever ConditionTimeout > 0, and
+                the Wait ▾ "wait for condition" preset arms exactly that on a TimeWindow —
+                hiding the field made the preset's central parameter invisible and
+                uneditable for one of its six conditions. */}
+            {!isIfRandom && (
             <Field
               label="Wait for condition"
               hint={tt('How long to keep re-checking before giving up. 0 = check once.', 'Por quanto tempo continuar checando antes de desistir. 0 = checa uma vez.')}
@@ -2359,12 +2372,12 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited, se
             {isAssert && (
             <Field
               label="On failure"
-              hint={tt('Abort names the failure and stops. Continue only logs a warning — it does NOT mark a data-loop row failed; for that leave this on Abort and set the Data panel to "Skip row".',
-                      'Abort nomeia a falha e para. Continue só registra um aviso — NÃO marca a linha do data loop como falha; para isso deixe em Abort e ponha o painel Data em "Skip row".')}
+              hint={tt('Abort names the failure and stops. Continue only logs a warning — it does NOT mark a data-loop row failed; for that leave this on Abort and set the Data panel to "Skip row". Stop quietly ends the run with no error — and beats the table’s "Skip row" policy.',
+                      'Abort nomeia a falha e para. Continue só registra um aviso — NÃO marca a linha do data loop como falha; para isso deixe em Abort e ponha o painel Data em "Skip row". Stop quietly encerra a execução sem erro — e prevalece sobre o "Skip row" da tabela.')}
             >
-              {/* Same 'Halt' | 'Continue' state BrowserAssert uses (persisted as ''|'Continue');
+              {/* Same tri-state BrowserAssert uses (persisted as ''|'Continue'|'StopReplay');
                   only the label reads "Abort", which is what the failure actually does. */}
-              <SegmentedControl<'Halt' | 'Continue'>
+              <SegmentedControl<'Halt' | 'Continue' | 'StopReplay'>
                 ariaLabel="On assert failure"
                 grow
                 value={assertOnFail}
@@ -2372,6 +2385,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited, se
                 options={[
                   { value: 'Halt', label: 'Abort', tip: tt('Stop the run and report which assert failed (default)', 'Para a execução e informa qual assert falhou (padrão)') },
                   { value: 'Continue', label: 'Continue', tip: tt('Log a warning and keep going', 'Registra um aviso e segue') },
+                  { value: 'StopReplay', label: 'Stop quietly', tip: tt('End the run with no error — like pressing Stop yourself. Beats the data table’s "Skip row" policy.', 'Encerra a execução sem erro — como apertar Stop você mesmo. Prevalece sobre o "Skip row" da tabela de dados.') },
                 ]}
               />
             </Field>
@@ -2778,6 +2792,24 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited, se
               {isElse
                 ? tt('Else marks the FALSE branch of its If block. Configure the condition on the opening If row — nothing to set here.', 'Else marca o ramo FALSE do bloco If. Configure a condição na linha If de abertura — nada a definir aqui.')
                 : tt('End If closes the conditional block. Configure the condition on the opening If row — nothing to set here.', 'End If fecha o bloco condicional. Configure a condição na linha If de abertura — nada a definir aqui.')}
+            </div>
+          )}
+
+          {/* Stop / Return — flow leaves in the Else/EndIf stub mold, tinted with the flow
+              family (pause fallback) instead of the If teal. Delay + Notes still apply. */}
+          {(actionType === 'Stop' || actionType === 'Return') && (
+            <div
+              className="border-l-2 rounded px-2.5 py-2 text-[11px] leading-relaxed text-text-secondary"
+              style={{
+                borderColor: 'var(--color-action-flow-fg, var(--color-action-pause-fg))',
+                backgroundColor: 'color-mix(in srgb, var(--color-action-flow-fg, var(--color-action-pause-fg)) 8%, transparent)',
+              }}
+            >
+              {actionType === 'Stop'
+                ? tt('Stop ends the whole run here as a normal finish — no error, no toast. Rows after it never run. Useful inside a conditional: "if the goal is reached, we are done."',
+                     'Stop encerra a execução inteira aqui como um término normal — sem erro, sem toast. As linhas depois dele nunca rodam. Útil dentro de um condicional: "se o objetivo foi alcançado, acabou."')
+                : tt('Return ends only the CURRENT pass — the remaining repeat passes or data rows still run. Rows after it in this pass never run.',
+                     'Return encerra só o passe ATUAL — os passes de repetição ou linhas de dados restantes continuam. As linhas depois dele neste passe nunca rodam.')}
             </div>
           )}
 
@@ -3632,7 +3664,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited, se
                 moves on. "Wait Condition" above uses "Is NOT present" instead of a Negate. */}
             {isBrowserAssert && (
             <Field label="On Fail">
-              <SegmentedControl<'Halt' | 'Continue'>
+              <SegmentedControl<'Halt' | 'Continue' | 'StopReplay'>
                 ariaLabel="On assertion fail"
                 grow
                 value={assertOnFail}
@@ -3640,6 +3672,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited, se
                 options={[
                   { value: 'Halt', label: 'Halt', tip: tt('Stop the replay and report when the assertion is not met.', 'Para o replay e reporta quando a asserção não é satisfeita.') },
                   { value: 'Continue', label: 'Continue', tip: tt('Log and continue to the next action even if the assertion fails.', 'Registra e segue para a próxima ação mesmo se a asserção falhar.') },
+                  { value: 'StopReplay', label: 'Stop quietly', tip: tt('End the run with no error — like pressing Stop yourself.', 'Encerra a execução sem erro — como apertar Stop você mesmo.') },
                 ]}
               />
             </Field>

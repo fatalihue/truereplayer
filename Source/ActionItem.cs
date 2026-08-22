@@ -565,7 +565,10 @@ namespace TrueReplayer.Models
             // leaf condition row in the same boat: it checks state, it never clicks anywhere.
             // (This is the THIRD no-coord list — SheetPanel.tsx and displayUtils.ts each keep
             // their own; a type missing here shows phantom 0,0 in the Copy-as-Table export.)
-            "If", "Else", "EndIf", "Assert"
+            "If", "Else", "EndIf", "Assert",
+            // Flow leaves — Stop ends the run, Return ends the current pass. They decide,
+            // they never touch the screen. Same third-list warning as above applies.
+            "Stop", "Return"
         };
 
         private bool HideCoordinates => NoCoordinateActionTypes.Contains(ActionType ?? "");

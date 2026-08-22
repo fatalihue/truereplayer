@@ -233,6 +233,30 @@ namespace TrueReplayer.Services
             (p => p.Actions.Any(UsesPickToken),
                 new Version(2, 24, 0), "Random choice token"),
 
+            // The Stop action — ends the run early AS SUCCESS. An older build has no case for
+            // it in the replay switch: the row is silently skipped and the run KEEPS GOING past
+            // the point the author said "we're done" — the If/Else no-op class, and the rows
+            // after a Stop are usually exactly the ones that must not run.
+            // Introduced after 2.24.0 — bump at release.
+            (p => p.Actions.Any(a => string.Equals(a.ActionType, "Stop", StringComparison.OrdinalIgnoreCase)),
+                new Version(2, 24, 0), "Stop action"),
+
+            // The Return line — ends only the current pass (repeat iteration / data row); the
+            // remaining passes continue. An older build no-ops the row and runs the rest of the
+            // pass it was meant to cut short — the same silent-flow class as Stop.
+            // Introduced after 2.24.0 — bump at release.
+            (p => p.Actions.Any(a => string.Equals(a.ActionType, "Return", StringComparison.OrdinalIgnoreCase)),
+                new Version(2, 24, 0), "Return flow line"),
+
+            // Assert quiet-stop (AssertOnFail == "StopReplay") — property-level pin, the
+            // SlotMode=='clear' mold. An older build doesn't know the value and falls through
+            // to the arms below it: in a plain run that's the LOUD halt (still stops, just
+            // with an error toast — benign), but under a skip-mode data loop it's the row-skip
+            // arm — the batch KEEPS RUNNING through the very thing the author said should end
+            // it quietly. That flip is why this pins. Introduced after 2.24.0 — bump at release.
+            (p => p.Actions.Any(a => string.Equals(a.AssertOnFail, "StopReplay", StringComparison.OrdinalIgnoreCase)),
+                new Version(2, 24, 0), "Assert quiet-stop policy"),
+
             // A modifier chain on {clip:name} / {var:name} / {winclip:N}. Those heads carried no
             // chain before 2.20.0, so an older build's regex does not match the token at all and
             // types it out verbatim — the literal-token failure class of the winclip and

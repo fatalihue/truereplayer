@@ -17,7 +17,7 @@ const DISPLAY_KEY_MAP: Record<string, string> = {
   'Next': 'Page Down', 'Prior': 'Page Up',
 };
 
-const NO_COORD_TYPES = new Set(['Assert', 'KeyDown', 'KeyUp', 'Keystroke', 'HoldKey', 'ScrollUp', 'ScrollDown', 'SendText', 'SetVariable', 'CopyToSlot', 'ActivateWindow', 'WaitImage', 'WaitPixelColor', 'BrowserClick', 'BrowserRightClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate', 'BrowserSelectOption', 'BrowserAssert', 'RunProfile', 'Pause', 'If', 'Else', 'EndIf']);
+const NO_COORD_TYPES = new Set(['Assert', 'KeyDown', 'KeyUp', 'Keystroke', 'HoldKey', 'ScrollUp', 'ScrollDown', 'SendText', 'SetVariable', 'CopyToSlot', 'ActivateWindow', 'WaitImage', 'WaitPixelColor', 'BrowserClick', 'BrowserRightClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate', 'BrowserSelectOption', 'BrowserAssert', 'RunProfile', 'Pause', 'If', 'Else', 'EndIf', 'Stop', 'Return']);
 
 export function getDisplayKey(key: string): string {
   if (!key) return '';
@@ -99,6 +99,15 @@ function computeActionTypeColors(actionType: string): { bg: string; fg: string }
   // single action — the same trade-off the CopyToSlot and ActivateWindow entries below record.
   if (actionType === 'Assert')
     return { bg: 'var(--color-action-if-bg)', fg: 'var(--color-action-if-fg)' };
+  // Flow leaves (Stop / Return): dedicated tokens with a pause fallback so every theme
+  // works untouched — the ActivateWindow opt-in mold below. Placed ABOVE the greedy
+  // substring matchers on principle (none catches these two today, but the order is
+  // what keeps that true tomorrow).
+  if (actionType === 'Stop' || actionType === 'Return')
+    return {
+      bg: 'var(--color-action-flow-bg, var(--color-action-pause-bg))',
+      fg: 'var(--color-action-flow-fg, var(--color-action-pause-fg))',
+    };
   if (actionType.startsWith('Browser'))
     return { bg: 'var(--color-action-browser-bg)', fg: 'var(--color-action-browser-fg)' };
   if (actionType.includes('Click'))
@@ -141,26 +150,8 @@ export function getActionTypeColors(actionType: string): { bg: string; fg: strin
   return result;
 }
 
-export function getActionTypeIcon(actionType: string): string {
-  if (actionType.startsWith('Browser')) return 'Globe';
-  if (actionType.includes('Click')) return 'Mouse';
-  if (actionType === 'ScrollUp') return 'ArrowUp';
-  if (actionType === 'ScrollDown') return 'ArrowDown';
-  if (actionType.startsWith('Key')) return 'Keyboard';
-  if (actionType === 'HoldKey') return 'Timer';
-  if (actionType === 'SendText') return 'Type';
-  if (actionType === 'SetVariable') return 'Braces';
-  if (actionType === 'CopyToSlot') return 'ClipboardCopy';
-  if (actionType === 'WaitImage') return 'ScanSearch';
-  if (actionType === 'WaitPixelColor') return 'Pipette';
-  if (actionType === 'RunProfile') return 'Repeat2';
-  if (actionType === 'ActivateWindow') return 'AppWindow';
-  if (actionType === 'Pause') return 'Hourglass';
-  // Conditional logic — Lucide's GitBranch is the universal "branch / decision"
-  // glyph and matches the mockup. Else uses the two-way swap arrows, EndIf uses
-  // a closing chevron (visually "block closes here").
-  if (actionType === 'If') return 'GitBranch';
-  if (actionType === 'Else') return 'ArrowRightLeft';
-  if (actionType === 'EndIf') return 'ChevronDown';
-  return 'Zap';
-}
+// NOTE: the icon mapping deliberately does NOT live here. The live renderer is
+// ActionTable's ActionIcon component; a string-returning mirror used to sit in this
+// file with ZERO call sites and silently drifted (it never learned Assert, and the
+// Wave-2 flow icons briefly landed only there) — a dead mirror is a drift bomb, so
+// it was removed rather than repaired.

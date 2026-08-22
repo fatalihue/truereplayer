@@ -1611,6 +1611,21 @@ namespace TrueReplayer.Services
         // state, reset per iteration.
         private bool _rowFaulted;
         private string? _rowFaultReason;
+        // Return (D6): ends only the CURRENT ExecuteActionsAsync pass. The action loop's
+        // boundary check breaks on it, and each of the three call sites clears it right
+        // after its await, so the REMAINING passes (repeat-loop iterations, data rows,
+        // root-loop iterations) still run. NEVER fold this into _rowFaulted: that flag
+        // propagates through RunProfile recursion levels by design, and Return must not.
+        // Replay-thread-only state, defensively reset at fresh-run.
+        private bool _returnRequested;
+        // Token cancellation used to mean exactly one thing: a user abort. The Stop action and
+        // the Assert quiet-stop policy gave it a SECOND meaning — an authored SUCCESS finish —
+        // and the end-of-run notices (skip summaries, lap notice) gate on the token to stay
+        // quiet after a user abort. This flag threads the new meaning through those gates: an
+        // authored finish is a normal finish, so notices about rows that genuinely failed (or
+        // a completed cursor lap) still belong on screen. Set only by the two authored cancel
+        // sites; reset at fresh-run.
+        private bool _authoredStop;
         // Skip mode gates on the BATCH data loop only — cursor mode and plain runs keep the
         // exact halt semantics they had (skip-on-error is a data-loop robustness knob).
         // _softFaultOverride: RunProfile-over-data (Phase C) sets it while a HALT-mode sub
@@ -2117,6 +2132,8 @@ namespace TrueReplayer.Services
                 _currentRowData = null;
                 _rowFaulted = false;
                 _rowFaultReason = null;
+                _returnRequested = false;  // defensive: a Return must never leak in from a prior run
+                _authoredStop = false;     // idem for an authored Stop / quiet-stop
                 _softFaultOverride = false;
                 _relGeometryDriftWarned = false;   // one geometry-drift notice per run
                 ResetRunReport();          // the report describes THIS run only
@@ -2200,6 +2217,10 @@ namespace TrueReplayer.Services
                             FaultRow(ex.Message);
                         }
 
+                        // Return (D6): consumed AFTER the await, never in the while condition —
+                        // it ended THIS iteration's pass; the remaining iterations are the point.
+                        _returnRequested = false;
+
                         if (_rowFaulted)
                         {
                             // Release anything the faulted row left pressed BEFORE moving on —
@@ -2225,7 +2246,9 @@ namespace TrueReplayer.Services
 
                 // One honest end-of-run summary instead of a toast per skipped row. Rides the
                 // error channel on purpose: rows DID fail; the log has the per-row reasons.
-                if (skippedRows > 0 && !token.IsCancellationRequested)
+                // _authoredStop re-opens the gate: a Stop/quiet-stop finish reads as a normal
+                // success, and a success cue that hides "2 rows failed" would be a lie.
+                if (skippedRows > 0 && (!token.IsCancellationRequested || _authoredStop))
                     OnReplayError?.Invoke($"Data loop finished — {skippedRows} of {_loopCount} row(s) skipped after errors (first: {firstSkipNote})");
 
                 // Cursor-mode lap notice. Armed at the top of the run (the cursor advances
@@ -2233,7 +2256,9 @@ namespace TrueReplayer.Services
                 // own end-of-run cue rather than before the row was actually used. Not raised
                 // on a user Stop: the host's run-end notifier suppresses those too, and being
                 // told "list complete" right after aborting is noise.
-                if (lapCompletedRows > 0 && !token.IsCancellationRequested)
+                // Same _authoredStop re-open as the skip summary: an authored finish that
+                // consumed the last row still owes the "lap complete" signal.
+                if (lapCompletedRows > 0 && (!token.IsCancellationRequested || _authoredStop))
                     OnDataLapCompleted?.Invoke(lapCompletedRows);
             }
             // OperationCanceledException is the BASE type (TaskCanceledException derives from it),
@@ -2466,7 +2491,9 @@ namespace TrueReplayer.Services
             {
                 // _rowFaulted: a skip-mode action failure unwinds the rest of the row's
                 // actions (and any RunProfile recursion level) without cancelling the run.
-                if (token.IsCancellationRequested || _rowFaulted) break;
+                // _returnRequested: a Return row ended the current pass — unwind this frame;
+                // the call sites consume the flag so later passes start clean.
+                if (token.IsCancellationRequested || _rowFaulted || _returnRequested) break;
                 var action = actions[i];
 
                 // Chain read-out progress — see OnChainStep. Emitted only from inside a sub-profile
@@ -2832,13 +2859,57 @@ namespace TrueReplayer.Services
                         }
                         case "SetVariable": await ExecuteSetVariable(action); break;
                         case "CopyToSlot": await ExecuteCopyToSlot(action, token); break;
-                        case "Assert": await ExecuteAssert(action, token); break;
+                        case "Assert": {
+                            // D4 quiet-stop: the row stays "ok" (the probe RAN — the same
+                            // philosophy the If row applies) and the Detail says what happened.
+                            bool quietStopped = await ExecuteAssert(action, token);
+                            // "failed", not "not met": the quiet stop also fires when the probe
+                            // could not be CHECKED, and the report must not claim a judgment
+                            // that never happened.
+                            if (quietStopped && !_runStepsFull)
+                                stepRec.Detail = (stepRec.Detail is { Length: > 0 } d ? d + " " : "")
+                                    + "— assert failed · stopped run (quiet)";
+                            break;
+                        }
                         case "ActivateWindow": await ExecuteActivateWindow(action, token); break;
                         case "WaitImage": await ExecuteWaitImage(action, token); break;
                         case "WaitPixelColor": await ExecuteWaitPixelColor(action, token); break;
                         case "RunProfile": await HandleRunProfile(action, token); break;
                         case "Pause": await ExecutePause(action, token); break;
-                        case "BrowserAssert": await ExecuteBrowserAssert(action, token); break;
+                        case "BrowserAssert": {
+                            bool quietStopped = await ExecuteBrowserAssert(action, token);
+                            // "failed", not "not met" — see the desktop Assert case above.
+                            if (quietStopped && !_runStepsFull)
+                                stepRec.Detail = (stepRec.Detail is { Length: > 0 } d ? d + " " : "")
+                                    + "— assert failed · stopped run (quiet)";
+                            break;
+                        }
+                        case "Stop": {
+                            // D5: end the WHOLE run as SUCCESS — "the macro decided it is done".
+                            // No OnReplayError and no _userStopped flag: the cancel unwinds
+                            // through the OCE catches, StartAsync's finally lands the status on
+                            // "ready", and the bridge emits its normal success cue.
+                            //
+                            // Ordering proof for this row reading "ok": nothing awaits between
+                            // Cancel and this frame's finally, so the OCE catch below cannot fire
+                            // for THIS row and the finally's running→ok promotion runs; parent
+                            // frames return normally ("ok" as well). A future await inserted
+                            // after the Cancel would break that proof — don't.
+                            if (!_runStepsFull) stepRec.Detail = "run ended by Stop";
+                            _authoredStop = true;   // notices gate: authored finish ≠ user abort
+                            try { _cts?.Cancel(); } catch (ObjectDisposedException) { }
+                            break;
+                        }
+                        case "Return": {
+                            // D6: end only the CURRENT pass — the boundary check at the top of
+                            // this loop breaks on the flag, and each caller clears it after its
+                            // await, so repeat passes / data rows / loop iterations continue.
+                            // Held keys are NOT released here on purpose: Return is authored
+                            // flow, exactly like reaching the end of the list.
+                            if (!_runStepsFull) stepRec.Detail = "ended this pass";
+                            _returnRequested = true;
+                            break;
+                        }
                         case "BrowserClick":
                         case "BrowserRightClick":
                         case "BrowserType":
@@ -3195,6 +3266,9 @@ namespace TrueReplayer.Services
                     for (int r = 0; r < repeats && !token.IsCancellationRequested && !_rowFaulted; r++)
                     {
                         await ExecuteActionsAsync(subActions, token);
+                        // Return (D6) ends THIS pass only — passes r+1.. still run. Cleared
+                        // after the await, never in the for condition.
+                        _returnRequested = false;
                     }
                 }
             }
@@ -3293,6 +3367,10 @@ namespace TrueReplayer.Services
                         FaultRow(ex.Message);
                     }
 
+                    // Return (D6): ended THIS row's pass — the next data row still runs.
+                    // Consumed before the fault check (a Return is not a fault).
+                    _returnRequested = false;
+
                     if (!_rowFaulted) continue;
 
                     if (subSkip)
@@ -3315,9 +3393,11 @@ namespace TrueReplayer.Services
                     break;
                 }
 
-                // Suppressed after a deliberate Stop — a notice right after the user's own
-                // abort is noise (StartAsync's summary applies the same gate).
-                if (skipped > 0 && !token.IsCancellationRequested)
+                // Suppressed after a user abort — a notice right after the user's own abort is
+                // noise (StartAsync's summary applies the same gate). An AUTHORED Stop /
+                // quiet-stop is not an abort: _authoredStop re-opens the gate so failed rows
+                // are still reported under the success cue.
+                if (skipped > 0 && (!token.IsCancellationRequested || _authoredStop))
                 {
                     string msg = $"Sub-profile '{subName}': {skipped} of {rowCount} row(s) skipped" +
                         (firstReason != null ? $" — first: {firstReason}" : "");
@@ -3814,12 +3894,13 @@ namespace TrueReplayer.Services
         // failure surfaces as a BrowserActionException which we convert into the friendly
         // Halt/Continue policy. Bridge not connected = we can't verify ⇒ that's a FAILURE
         // (contrast If-Browser, which reads "not found" and branches).
-        private async Task ExecuteBrowserAssert(ActionItem action, CancellationToken token)
+        // Returns true when the quiet-stop policy (AssertOnFail == "StopReplay") ended the
+        // run — the caller's switch case annotates the step's Detail with it.
+        private async Task<bool> ExecuteBrowserAssert(ActionItem action, CancellationToken token)
         {
             if (_browserBridge == null || !_browserBridge.IsConnected)
             {
-                HandleAssertFailure(action, "browser bridge not connected");
-                return;
+                return HandleAssertFailure(action, "browser bridge not connected");
             }
             int timeout = action.Timeout > 0 ? action.Timeout : 5000;
             try
@@ -3842,12 +3923,13 @@ namespace TrueReplayer.Services
                 // and lands in the catch below instead, so this arm should no longer be reachable —
                 // it stays because the rule it encodes is the one that matters: we could not verify,
                 // therefore the assertion FAILED and goes through the policy. Never a silent stop.
-                HandleAssertFailure(action, "browser bridge disconnected");
+                return HandleAssertFailure(action, "browser bridge disconnected");
             }
             catch (BrowserActionException ex)
             {
-                HandleAssertFailure(action, ex.Message);
+                return HandleAssertFailure(action, ex.Message);
             }
+            return false;
         }
 
         // BrowserAssert failure policy — mirrors HandleActivateWindowFailure. Default (null)
@@ -3873,7 +3955,7 @@ namespace TrueReplayer.Services
         /// "couldn't check" and "checked and it was false" are both "the precondition is not
         /// established", and the user's on-fail choice should govern both.
         /// </summary>
-        private async Task ExecuteAssert(ActionItem action, CancellationToken token)
+        private async Task<bool> ExecuteAssert(ActionItem action, CancellationToken token)
         {
             bool satisfied;
             try
@@ -3886,8 +3968,7 @@ namespace TrueReplayer.Services
             }
             catch (Exception ex)
             {
-                HandleAssertFailure(action, $"could not check the condition ({ex.Message})");
-                return;
+                return HandleAssertFailure(action, $"could not check the condition ({ex.Message})");
             }
             // The probe can return FALSE because the run was stopped mid-check, not because the
             // precondition failed: a blocking probe (File.Exists on a dead UNC share, a clipboard
@@ -3895,11 +3976,17 @@ namespace TrueReplayer.Services
             // EvaluateConditionWithTimeout's elapsed-window exit doesn't re-check either. Without
             // this guard, hitting Stop during that window pops a red "Assert failed" toast naming
             // a precondition that was never actually judged.
-            if (token.IsCancellationRequested) return;
+            if (token.IsCancellationRequested) return false;
             // A probe that faulted the row in skip-mode already unwound it; adding an assert
-            // failure on top would double-report the same row.
-            if (!satisfied && !_rowFaulted)
-                HandleAssertFailure(action, DescribeAssertExpectation(action));
+            // failure on top would double-report the same row. EXCEPT under the quiet-stop
+            // policy: "stop the run here" is the user's explicit choice and must beat the
+            // row-skip degradation (the same arm-order doctrine inside HandleAssertFailure) —
+            // otherwise a probe that faults instead of throwing would keep the batch running
+            // through the very assert marked "Stop quietly".
+            if (!satisfied && (!_rowFaulted
+                    || string.Equals(action.AssertOnFail, "StopReplay", StringComparison.OrdinalIgnoreCase)))
+                return HandleAssertFailure(action, DescribeAssertExpectation(action));
+            return false;
         }
 
         /// Human-readable "what was required" for the failure toast/log. The label (Comment/Key)
@@ -3968,7 +4055,9 @@ namespace TrueReplayer.Services
             }
         }
 
-        private void HandleAssertFailure(ActionItem action, string reason)
+        // Returns true only for the quiet-stop arm — the assert switch cases use it to
+        // annotate the step's Detail (the row itself still archives "ok": the probe RAN).
+        private bool HandleAssertFailure(ActionItem action, string reason)
         {
             string label = !string.IsNullOrWhiteSpace(action.Comment) ? action.Comment
                 : !string.IsNullOrWhiteSpace(action.Key) ? action.Key
@@ -3977,16 +4066,30 @@ namespace TrueReplayer.Services
             if (string.Equals(action.AssertOnFail, "Continue", StringComparison.OrdinalIgnoreCase))
             {
                 DiagnosticLog.Warn($"Assert '{label}': {reason} — Continue policy, moving on");
-                return;
+                return false;
+            }
+            // D4 "Stop quietly": end the run with NO error — the Stop-action framing. The arm
+            // sits ABOVE the skip check on purpose, and the order is semantic: the user's
+            // explicit "stop the run here" beats the table's row-skip policy — degrading it to
+            // "skip this row and keep going" would keep running the exact thing they asked to
+            // stop. No OnReplayError: the cancel unwinds through the OCE catches and the bridge
+            // emits its normal success cue (byte-identical path to the Stop action's proof).
+            if (string.Equals(action.AssertOnFail, "StopReplay", StringComparison.OrdinalIgnoreCase))
+            {
+                DiagnosticLog.Warn($"Assert '{label}': {reason} — quiet-stop policy, run ended");
+                _authoredStop = true;   // notices gate: authored finish ≠ user abort
+                try { _cts?.Cancel(); } catch (ObjectDisposedException) { }
+                return true;
             }
             if (SkipRowOnErrorActive)
             {
                 FaultRow($"Assert failed: '{label}' — {reason}");
-                return;
+                return false;
             }
             DiagnosticLog.Warn($"Replay aborted: Assert '{label}' — {reason}");
             OnReplayError?.Invoke($"Assert failed: '{label}' — {reason}");
             try { _cts?.Cancel(); } catch (ObjectDisposedException) { }
+            return false;
         }
 
         // One failure policy for all three modes (launch threw / window never appeared /

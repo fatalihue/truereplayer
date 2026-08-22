@@ -282,6 +282,9 @@ namespace TrueReplayer
                 // MIRROR of the executor's dispatch, so it is wrong whenever it is a subset —
                 // a new case in ActionExecution has to be added here in the same commit.
                 "If", "Else", "EndIf", "Assert",
+                // Flow leaves (2.24.0+): Stop ends the run as success, Return ends the current
+                // pass. Cases in ActionExecution's switch — the mirror rule above applies.
+                "Stop", "Return",
                 "BrowserClick", "BrowserRightClick", "BrowserType",
                 "BrowserWaitElement", "BrowserNavigate", "BrowserSelectOption", "BrowserAssert",
             };
@@ -3570,8 +3573,10 @@ namespace TrueReplayer
                     action.WindowMatchIndex = int.TryParse(value, out int wmi) && wmi > 1 ? wmi : (int?)null;
                     break;
                 case "assertOnFail":
-                    // BrowserAssert — only "Continue" persisted; default "Halt" stays null.
-                    action.AssertOnFail = value == "Continue" ? "Continue" : null;
+                    // Assert/BrowserAssert — "Continue" and "StopReplay" (quiet-stop, D4)
+                    // persist; the default "Halt" stays null. Without the StopReplay arm this
+                    // normalization silently reverted the FE's quiet-stop save back to Halt.
+                    action.AssertOnFail = (value == "Continue" || value == "StopReplay") ? value : null;
                     break;
                 case "clipboardPatternType":
                     // Default "contains" stays null on disk; only "equals"/"regex" persist.
@@ -4224,6 +4229,21 @@ namespace TrueReplayer
                 return;
             }
 
+            // Stop / Return: flow leaves — insert directly, nothing to configure, no Sheet.
+            // Same direct-insert mold as Scroll above (the return exits from inside the
+            // branch, ahead of the unrecognized-type redo-unwind tail).
+            if (actionType == "Stop" || actionType == "Return")
+            {
+                int delay = int.TryParse(CustomDelay, out var fd) ? fd : 100;
+                actions.Insert(insertIndex, new ActionItem { ActionType = actionType, Delay = delay, Comment = "" });
+                for (int i = 0; i < actions.Count; i++)
+                    actions[i].RowNumber = i + 1;
+                HasUnsavedChanges = true;
+                PushActionsUpdate();
+                mainController.UpdateButtonStates();
+                return;
+            }
+
             // WaitImage: capture screen region
             if (actionType == "WaitImage")
             {
@@ -4528,6 +4548,20 @@ namespace TrueReplayer
                     return;   // unknown/unsupported family — no-op, same posture as the If path
             }
 
+            // Optional preset overrides (the Wait ▾ "wait for condition" items): a longer
+            // poll budget and a pre-armed on-fail policy. The 10-minute ceiling is THIS
+            // door's only (the Sheet's editor floors at 0 with no ceiling — deliberate:
+            // a hand-crafted insert message shouldn't arm an hour-long silent poll, while
+            // an explicit Sheet edit is the user's own call). Absent fields keep the
+            // classic Assert seed, so the Assert ▾ path is unchanged.
+            int conditionTimeout = payload.TryGetProperty("conditionTimeout", out var tEl) && tEl.ValueKind == JsonValueKind.Number
+                ? Math.Clamp(tEl.GetInt32(), 0, 600000)
+                : 1500;
+            string? assertOnFail = payload.TryGetProperty("assertOnFail", out var fEl) && fEl.ValueKind == JsonValueKind.String
+                && (fEl.GetString() == "StopReplay" || fEl.GetString() == "Continue")
+                ? fEl.GetString()
+                : null;   // default Halt stays null, matching the actions:edit normalization
+
             PushUndoState();
             actions.Insert(insertIndex, new ActionItem
             {
@@ -4536,7 +4570,8 @@ namespace TrueReplayer
                 Delay = 0,
                 Key = "",
                 Comment = "",
-                ConditionTimeout = 1500,
+                ConditionTimeout = conditionTimeout,
+                AssertOnFail = assertOnFail,
             });
             for (int i = 0; i < actions.Count; i++)
                 actions[i].RowNumber = i + 1;

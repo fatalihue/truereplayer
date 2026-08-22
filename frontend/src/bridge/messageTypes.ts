@@ -167,7 +167,8 @@ export interface ActionItem {
   windowMatchIndex?: number | null;
   // BrowserAssert — verify a page element (reuses key=selector, waitMode, browserText,
   // timeout, selectorAlternatives) and FAIL the replay if it's not in the expected state.
-  // null = 'Halt' (default — stop loudly) | 'Continue' (log and move on).
+  // null = 'Halt' (default — stop loudly) | 'Continue' (log and move on) | 'StopReplay'
+  // (quiet-stop: end the run with the normal success framing, no error).
   assertOnFail?: string | null;
 }
 
@@ -985,7 +986,9 @@ export type OutgoingMessage =
   // actions:insertConditional, which always inserts a block pair. Narrower condition union on
   // purpose: image/pixel already abort on timeout via WaitImage/WaitPixelColor, Random is
   // meaningless as a requirement, and a page element has its own BrowserAssert action.
-  | { type: 'actions:insertAssert'; payload: { conditionType: 'WindowOpen' | 'ProcessRunning' | 'ClipboardMatch' | 'Variable' | 'FileExists' | 'TimeWindow'; insertIndex: number } }
+  // conditionTimeout/assertOnFail are the Wait ▾ preset's pre-arm (poll budget 10 s +
+  // quiet-stop policy); absent, the backend keeps the classic Assert seed (1500 ms, Halt).
+  | { type: 'actions:insertAssert'; payload: { conditionType: 'WindowOpen' | 'ProcessRunning' | 'ClipboardMatch' | 'Variable' | 'FileExists' | 'TimeWindow'; insertIndex: number; conditionTimeout?: number; assertOnFail?: 'StopReplay' | 'Continue' } }
   // Conditional logic — delete the entire IF/ELSE/ENDIF block. Backend forward-scans
   // from ifRowIndex with a nested-IF stack to find the matching EndIf, then removes
   // the contiguous range [ifRowIndex..endIfIdx] inclusive (covers body + optional ELSE

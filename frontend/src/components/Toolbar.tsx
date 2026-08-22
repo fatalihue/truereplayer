@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect, lazy, Suspense } from 'react';
-import { Trash2, Undo2, Redo2, Type, ScanSearch, Pipette, Keyboard, Globe, Repeat2, Hourglass, X, GitBranch, ScanEye, Braces, AppWindow, Clipboard, ClipboardCopy, ChevronDown, Dice5, Cpu, FileCheck, Clock, Table2, ShieldCheck } from 'lucide-react';
+import { Trash2, Undo2, Redo2, Type, ScanSearch, Pipette, Keyboard, Globe, Repeat2, Hourglass, X, GitBranch, ScanEye, Braces, AppWindow, Clipboard, ClipboardCopy, ChevronDown, Dice5, Cpu, FileCheck, Clock, Table2, ShieldCheck, CircleStop, CornerDownLeft } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -176,6 +176,10 @@ export function Toolbar(_props: ToolbarProps) {
   // toolbar menus; separate state so the menus close independently of each other.
   const [showWaitMenu, setShowWaitMenu] = useState(false);
   const waitMenuRef = useRef<HTMLDivElement>(null);
+  // Assert ▾ — the Assert section extracted from Conditional ▾ (which was at 17 rows and
+  // climbing) plus the run-ending leaves; the menu is the "things that end the run" family.
+  const [showAssertMenu, setShowAssertMenu] = useState(false);
+  const assertMenuRef = useRef<HTMLDivElement>(null);
   const [showNavigateDialog, setShowNavigateDialog] = useState(false);
   const [showRunProfileDialog, setShowRunProfileDialog] = useState(false);
   // Pause modal (Pattern B normalization) — was an insert-then-Sheet flow before;
@@ -194,6 +198,7 @@ export function Toolbar(_props: ToolbarProps) {
   // viewport bottom/right edge so it isn't clipped. Measured on open by useFlyoutFlip.
   const waitFlyout = useFlyoutFlip(showWaitMenu, 'below');
   const conditionalFlyout = useFlyoutFlip(showConditionalMenu, 'below');
+  const assertFlyout = useFlyoutFlip(showAssertMenu, 'below');
   const browserFlyout = useFlyoutFlip(showBrowserMenu, 'below');
   // Clear All confirm popover — the only destructive toolbar action gets a
   // two-step confirm, anchored/dismissed exactly like the sibling flyouts.
@@ -291,8 +296,8 @@ export function Toolbar(_props: ToolbarProps) {
     };
   }, [send, showToast, tt]);
 
-  // Outside-press + Escape dismissal for the three insert dropdowns. One CALL per
-  // menu, not one call for all three: each keeps its own pair of listeners, bound
+  // Outside-press + Escape dismissal for the four insert dropdowns. One CALL per
+  // menu, not one call for all of them: each keeps its own pair of listeners, bound
   // only while that menu is open, which is what makes them close independently
   // (clicking inside Browser doesn't close Conditional, and vice versa). The
   // mousedown-not-click and capture-phase-Escape choices, and why they matter, are
@@ -302,6 +307,7 @@ export function Toolbar(_props: ToolbarProps) {
   useDismissOnOutside(showBrowserMenu, browserMenuRef, setShowBrowserMenu);
   useDismissOnOutside(showConditionalMenu, conditionalMenuRef, setShowConditionalMenu);
   useDismissOnOutside(showWaitMenu, waitMenuRef, setShowWaitMenu);
+  useDismissOnOutside(showAssertMenu, assertMenuRef, setShowAssertMenu);
 
   // Close the Clear-All confirm if a run starts (or the list empties) while it's
   // open — runs are usually started by global hotkeys, which produce no mousedown,
@@ -604,10 +610,10 @@ export function Toolbar(_props: ToolbarProps) {
             <Hourglass size={14} />
           </button>
 
-          {/* Direct inserts | menu-based inserts divider. The three buttons after
-              this line open flyout menus (Wait / Conditional / Browser) — the
-              chevron each one carries is the "this opens a menu" affordance that
-              separates them from the one-click inserts to the left. */}
+          {/* Direct inserts | menu-based inserts divider. The four buttons after
+              this line open flyout menus (Wait / Conditional / Assert / Browser) —
+              the chevron each one carries is the "this opens a menu" affordance
+              that separates them from the one-click inserts to the left. */}
           <div className="w-px h-4 bg-border-subtle mx-0.5" />
 
           {/* Wait — sub-picker for the two blocking-probe variants. Replaces the
@@ -624,7 +630,7 @@ export function Toolbar(_props: ToolbarProps) {
               onClick={() => setShowWaitMenu(!showWaitMenu)}
               disabled={insertsDisabled}
               className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled flex items-center gap-0.5"
-              data-tip={clickerTip('Wait for Image / Pixel', 'Aguardar imagem / pixel')}
+              data-tip={clickerTip('Wait for image, pixel or condition', 'Aguardar imagem, pixel ou condição')}
             >
               <ScanEye size={14} />
               <ChevronDown size={9} className="opacity-60" />
@@ -658,6 +664,39 @@ export function Toolbar(_props: ToolbarProps) {
                   <Pipette size={12} className="text-accent-light" />
                   Wait for Pixel Color
                 </button>
+                {/* Wait-for-condition presets (D4): a pre-armed Assert — 10 s poll budget +
+                    the quiet-stop policy — so "wait until the window opens, and if it never
+                    does, just end the run with no error" is ONE click. Lives HERE and not in
+                    Assert ▾: the intent a user arrives with is "wait for", and a full second
+                    section there would push that menu past its height budget. The Sheet still
+                    opens pre-filled, so everything stays editable. accent-light icons mark
+                    these as wait-flavored, distinct from the If/Assert teal. */}
+                <div className="my-1 border-t border-border-subtle" />
+                <div className="px-3 py-1 label-micro text-text-tertiary">
+                  Wait for condition — stop quietly on timeout
+                </div>
+                {([
+                  { ct: 'WindowOpen', Icon: AppWindow, label: 'Window Open' },
+                  { ct: 'ProcessRunning', Icon: Cpu, label: 'Process Running' },
+                  { ct: 'ClipboardMatch', Icon: Clipboard, label: 'Clipboard' },
+                  { ct: 'Variable', Icon: Braces, label: 'Variable' },
+                  { ct: 'FileExists', Icon: FileCheck, label: 'File Exists' },
+                  { ct: 'TimeWindow', Icon: Clock, label: 'Time' },
+                ] as const).map(({ ct, Icon, label }) => (
+                  <button
+                    key={`waitcond-${ct}`}
+                    className="w-full text-left px-3 py-1.5 text-xs text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors flex items-center gap-2"
+                    onClick={() => {
+                      const sel = selectionRef.current;
+                      const insertIndex = sel.size > 0 ? Math.min(...sel) : actions.length;
+                      send({ type: 'actions:insertAssert', payload: { conditionType: ct, insertIndex, conditionTimeout: 10000, assertOnFail: 'StopReplay' } });
+                      setShowWaitMenu(false);
+                    }}
+                  >
+                    <Icon size={12} className="text-accent-light" />
+                    {label}
+                  </button>
+                ))}
               </div>
             )}
           </div>
@@ -766,15 +805,31 @@ export function Toolbar(_props: ToolbarProps) {
                   </button>
                 ))}
 
-                {/* Assert — same probe families, opposite intent: an If BRANCHES on the answer
-                    (both outcomes legitimate, silence is correct), an Assert REQUIRES it and
-                    stops with a named failure otherwise. Listed here because that is where a
-                    user goes looking for "check something", and kept to the six STATE families:
-                    image/pixel already abort on timeout via Wait Image / Wait Pixel Color, and
-                    a page element has its own Assert Element under Browser Actions. */}
-                <div className="my-1 border-t border-border-subtle" />
-                <div className="px-3 py-1 label-micro text-text-tertiary flex items-center gap-1.5">
-                  <ShieldCheck size={11} />
+              </div>
+            )}
+          </div>
+
+          {/* Assert ▾ — the "things that end the run" family. The six state asserts moved
+              here verbatim from Conditional ▾ (which was at 17 rows and climbing; an If
+              BRANCHES on the answer, an Assert REQUIRES it — different intents, different
+              menus). Below them, the flow leaves: Stop ends the whole run as a normal
+              finish, Return ends only the current pass. Image/pixel asserts stay out on
+              purpose (Wait Image / Wait Pixel Color already abort on timeout), and a page
+              element has its own Assert Element under Browser Actions. */}
+          <div className="relative" ref={assertMenuRef}>
+            <button
+              tabIndex={-1}
+              onClick={() => setShowAssertMenu(!showAssertMenu)}
+              disabled={insertsDisabled}
+              className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled flex items-center gap-0.5"
+              data-tip={clickerTip('Assert / end the run', 'Assert / encerrar a execução')}
+            >
+              <ShieldCheck size={14} />
+              <ChevronDown size={9} className="opacity-60" />
+            </button>
+            {showAssertMenu && (
+              <div ref={assertFlyout.ref} className={`absolute w-56 bg-bg-surface border border-border-default rounded-lg shadow-xl z-50 py-1 ${assertFlyout.flipX ? 'right-0' : 'left-0'} ${assertFlyout.flipY ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
+                <div className="px-3 py-1 label-micro text-text-tertiary">
                   Insert Assert — must be true
                 </div>
                 {([
@@ -792,11 +847,34 @@ export function Toolbar(_props: ToolbarProps) {
                       const sel = selectionRef.current;
                       const insertIndex = sel.size > 0 ? Math.min(...sel) : actions.length;
                       send({ type: 'actions:insertAssert', payload: { conditionType: ct, insertIndex } });
-                      setShowConditionalMenu(false);
+                      setShowAssertMenu(false);
                     }}
                   >
                     <Icon size={12} style={{ color: 'var(--color-action-if-fg)' }} />
                     {label}
+                  </button>
+                ))}
+                <div className="my-1 border-t border-border-subtle" />
+                <div className="px-3 py-1 label-micro text-text-tertiary">
+                  End the run
+                </div>
+                {([
+                  { at: 'Stop', Icon: CircleStop, label: 'Stop', tip: 'ends the whole run — success' },
+                  { at: 'Return', Icon: CornerDownLeft, label: 'Return', tip: 'ends this pass only' },
+                ] as const).map(({ at, Icon, label, tip }) => (
+                  <button
+                    key={`flow-${at}`}
+                    className="w-full text-left px-3 py-1.5 text-xs text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors flex items-center gap-2"
+                    onClick={() => {
+                      const sel = selectionRef.current;
+                      const insertIndex = sel.size > 0 ? Math.min(...sel) : actions.length;
+                      send({ type: 'actions:insertAction', payload: { actionType: at, insertIndex } });
+                      setShowAssertMenu(false);
+                    }}
+                  >
+                    <Icon size={12} style={{ color: 'var(--color-action-flow-fg, var(--color-action-pause-fg))' }} />
+                    {label}
+                    <span className="ml-auto text-[10px] text-text-tertiary">{tip}</span>
                   </button>
                 ))}
               </div>

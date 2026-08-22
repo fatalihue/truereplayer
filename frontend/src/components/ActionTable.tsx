@@ -6,7 +6,7 @@ import type { CollisionDetection, DragStartEvent, DragEndEvent } from '@dnd-kit/
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { snapCenterToCursor } from '@dnd-kit/modifiers';
 import { CSS } from '@dnd-kit/utilities';
-import { Mouse, MousePointerClick, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, ChevronDown, ChevronsDownUp, ChevronsUpDown, Plus, Pencil, ScanSearch, Pipette, Globe, CheckCheck, Check, Code2, Files, Hourglass, Repeat2, ExternalLink, Crosshair, Link, GripVertical, Timer, GitBranch, ArrowRightLeft, Combine, Split, MoreHorizontal, Focus, Braces, AppWindow, Clipboard, ClipboardCopy, Play, Pause, EyeOff, RotateCcw, Dice5, Cpu, FileCheck, Clock, ShieldCheck } from 'lucide-react';
+import { Mouse, MousePointerClick, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, ChevronDown, ChevronsDownUp, ChevronsUpDown, Plus, Pencil, ScanSearch, Pipette, Globe, CheckCheck, Check, Code2, Files, Hourglass, Repeat2, ExternalLink, Crosshair, Link, GripVertical, Timer, GitBranch, ArrowRightLeft, Combine, Split, MoreHorizontal, Focus, Braces, AppWindow, Clipboard, ClipboardCopy, Play, Pause, EyeOff, RotateCcw, Dice5, Cpu, FileCheck, Clock, ShieldCheck, CircleStop, CornerDownLeft } from 'lucide-react';
 import { canCollapse, canExpand, expandKeystroke } from '../utils/keyRepeat';
 import type { ActionItem } from '../bridge/messageTypes';
 import { useAppState, useHighlightedAction } from '../state/AppStateContext';
@@ -92,6 +92,10 @@ export function ActionIcon({ actionType, size = 12 }: { actionType: string; size
   if (actionType === 'If') return <GitBranch size={size} />;
   if (actionType === 'Else') return <ArrowRightLeft size={size} />;
   if (actionType === 'EndIf') return <ChevronDown size={size} />;
+  // Flow leaves — same glyphs as the Assert ▾ menu entries that insert them, per the
+  // "chip reads the same as the entry that inserts it" rule above.
+  if (actionType === 'Stop') return <CircleStop size={size} />;
+  if (actionType === 'Return') return <CornerDownLeft size={size} />;
   return <Zap size={size} />;
 }
 
@@ -173,6 +177,9 @@ function actionPillLabel(action: ActionItem): string {
     case 'If': return 'if';
     case 'Else': return 'else';
     case 'EndIf': return 'endif';
+    // Flow leaves share the keyword register: they are control flow, not gestures.
+    case 'Stop': return 'stop';
+    case 'Return': return 'return';
     default: return action.actionType;
   }
 }
