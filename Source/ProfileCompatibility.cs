@@ -221,65 +221,65 @@ namespace TrueReplayer.Services
             // arguments ("after:noaccents:x" is a delimiter, not a modifier) — a regex would
             // over-pin those, and would miss the arg-gate divergence chains ("line:noaccents",
             // where the old build read a failed literal gate and the new build applies the filter).
-            // Introduced after 2.24.0 — bump at release.
+            // Shipped in 2.25.0.
             (p => p.Actions.Any(UsesTextFilterModifier),
-                new Version(2, 24, 0), "Accent/digit filter modifiers"),
+                new Version(2, 25, 0), "Accent/digit filter modifiers"),
 
             // Random text-choice token {pick:a|b|c} — an older build has no PickTokenRegex, so the
             // whole token stays literal and gets typed into the target verbatim (the winclip
             // literal-token failure class). The ':' is mandatory in the detector, mirroring the
             // engine regex — a bare "{pick}" is literal on BOTH builds and must not pin.
-            // Introduced after 2.24.0 — bump at release.
+            // Shipped in 2.25.0.
             (p => p.Actions.Any(UsesPickToken),
-                new Version(2, 24, 0), "Random choice token"),
+                new Version(2, 25, 0), "Random choice token"),
 
             // The Stop action — ends the run early AS SUCCESS. An older build has no case for
             // it in the replay switch: the row is silently skipped and the run KEEPS GOING past
             // the point the author said "we're done" — the If/Else no-op class, and the rows
             // after a Stop are usually exactly the ones that must not run.
-            // Introduced after 2.24.0 — bump at release.
+            // Shipped in 2.25.0.
             (p => p.Actions.Any(a => string.Equals(a.ActionType, "Stop", StringComparison.OrdinalIgnoreCase)),
-                new Version(2, 24, 0), "Stop action"),
+                new Version(2, 25, 0), "Stop action"),
 
             // The Return line — ends only the current pass (repeat iteration / data row); the
             // remaining passes continue. An older build no-ops the row and runs the rest of the
             // pass it was meant to cut short — the same silent-flow class as Stop.
-            // Introduced after 2.24.0 — bump at release.
+            // Shipped in 2.25.0.
             (p => p.Actions.Any(a => string.Equals(a.ActionType, "Return", StringComparison.OrdinalIgnoreCase)),
-                new Version(2, 24, 0), "Return flow line"),
+                new Version(2, 25, 0), "Return flow line"),
 
             // The While loop block — an older build has no case for While/EndLoop: both rows
             // no-op through the silent default, so the BODY RUNS EXACTLY ONCE regardless of
             // the condition — the If/Else no-op class (2.3.0), on a block whose whole point
             // is repetition. One row of either type pins the feature.
-            // Introduced after 2.24.0 — bump at release.
+            // Shipped in 2.25.0.
             (p => p.Actions.Any(a => string.Equals(a.ActionType, "While", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(a.ActionType, "EndLoop", StringComparison.OrdinalIgnoreCase)),
-                new Version(2, 24, 0), "While loop"),
+                new Version(2, 25, 0), "While loop"),
 
             // Break / Next Iteration — an older build no-ops the jump row: a Break-guarded
             // loop keeps looping, a Next keeps running the rest of the iteration it was
             // meant to cut short. Shared row (they ship together, same failure class).
-            // Introduced after 2.24.0 — bump at release.
+            // Shipped in 2.25.0.
             (p => p.Actions.Any(a => string.Equals(a.ActionType, "BreakLoop", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(a.ActionType, "ContinueLoop", StringComparison.OrdinalIgnoreCase)),
-                new Version(2, 24, 0), "Loop control (Break/Next)"),
+                new Version(2, 25, 0), "Loop control (Break/Next)"),
 
             // For Each Data Row — an older build no-ops opener and closer and runs the body
             // ONCE in the ambient context: a block written to fan out over N rows silently
             // degrades to a single pass with whatever {row:col} happens to resolve.
-            // Introduced after 2.24.0 — bump at release.
+            // Shipped in 2.25.0.
             (p => p.Actions.Any(a => string.Equals(a.ActionType, "ForEachRow", StringComparison.OrdinalIgnoreCase)),
-                new Version(2, 24, 0), "For Each Data Row block"),
+                new Version(2, 25, 0), "For Each Data Row block"),
 
             // Assert quiet-stop (AssertOnFail == "StopReplay") — property-level pin, the
             // SlotMode=='clear' mold. An older build doesn't know the value and falls through
             // to the arms below it: in a plain run that's the LOUD halt (still stops, just
             // with an error toast — benign), but under a skip-mode data loop it's the row-skip
             // arm — the batch KEEPS RUNNING through the very thing the author said should end
-            // it quietly. That flip is why this pins. Introduced after 2.24.0 — bump at release.
+            // it quietly. That flip is why this pins. Shipped in 2.25.0.
             (p => p.Actions.Any(a => string.Equals(a.AssertOnFail, "StopReplay", StringComparison.OrdinalIgnoreCase)),
-                new Version(2, 24, 0), "Assert quiet-stop policy"),
+                new Version(2, 25, 0), "Assert quiet-stop policy"),
 
             // A modifier chain on {clip:name} / {var:name} / {winclip:N}. Those heads carried no
             // chain before 2.20.0, so an older build's regex does not match the token at all and
